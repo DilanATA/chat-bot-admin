@@ -23,8 +23,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "tenant is required" }, { status: 400 });
   }
 
-  const body = await req.json();
-  const { sheet_id, sheet_name, date_col, phone_col, plate_col, status_col } = body || {};
+  const raw = await req.json();
+  const sheet_id   = String(raw.sheet_id   ?? "").trim();
+  const sheet_name = String(raw.sheet_name ?? "").trim();
+  const date_col   = Number(raw.date_col ?? 4);
+  const phone_col  = Number(raw.phone_col ?? 3);
+  const plate_col  = Number(raw.plate_col ?? 1);
+  const status_col = Number(raw.status_col ?? 5);
 
   if (!sheet_id || !sheet_name) {
     return NextResponse.json({ ok: false, error: "sheet_id & sheet_name required" }, { status: 400 });
@@ -42,16 +47,8 @@ export async function POST(req: NextRequest) {
       status_col=excluded.status_col
   `);
 
-  upsert.run({
-    tenant,
-    sheet_id,
-    sheet_name,
-    date_col: Number(date_col ?? 4),
-    phone_col: Number(phone_col ?? 3),
-    plate_col: Number(plate_col ?? 1),
-    status_col: Number(status_col ?? 5),
-  });
-
+  upsert.run({ tenant, sheet_id, sheet_name, date_col, phone_col, plate_col, status_col });
   logAudit(tenant, "tenant_settings.update", { sheet_id, sheet_name, date_col, phone_col, plate_col, status_col });
+
   return NextResponse.json({ ok: true });
 }

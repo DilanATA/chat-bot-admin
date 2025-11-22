@@ -1,0 +1,37 @@
+﻿RUNBOOK — chat-bot-admin (Sprint-2 stable)
+
+1) GEREKLİ DOSYALAR
+- .env.local  → projeye kopyala (Google Sheets SA email+key, WhatsApp token+PN ID, template ad/dil)
+- database.sqlite (opsiyonel) → varsa yedeği kopyala. Yoksa lib/migrate.ts çalıştırıp tenant POST et.
+
+2) KURULUM
+- npm install
+- npx tsx lib/migrate.ts    # tablolar
+- npm run dev               # Next.js (http://localhost:3000)
+- (ops) npm run check-env   # env doğrulama
+
+3) WORKER TEST
+- npm run send-once:worker
+  Beklenen: “📦 FIRMA_A summary → total:X sent:Y ...”
+- Log ekranları:
+  - /dashboard/logs/messages
+  - /dashboard/logs/audit
+
+4) SORUN GİDERME
+- Sheets 404 → Spreadsheet ID yanlış (boşluk olmasın), veya share yok.
+- Sheets PERMISSION_DENIED → service account email’e “Editor” paylaşımı yap.
+- WhatsApp 190 → token geçersiz; temporary token yenile ya da System User token kullan.
+- WhatsApp 131030 → sandbox’ta test alıcı listesine numarayı ekle.
+- WhatsApp 132000 → template param sayısı uymuyor; bodyParams sırasını düzelt.
+
+5) ÖNEMLİ KOMUTLAR
+- Tenant yaz: POST /api/tenant/settings?tenant=FIRMA_A
+- Bugünkü failed’ları temizle: npm run clear-failed -- FIRMA_A
+- Env kontrol: npm run check-env
+
+6) SÜRÜM KİLİTLEME
+- node scripts/pin-versions.cjs
+- npm install
+- package-lock.json’ı commit’le
+
+— Son stabil etiket: v0.2-sprint2-stable
