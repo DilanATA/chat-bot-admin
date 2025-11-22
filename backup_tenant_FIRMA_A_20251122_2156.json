@@ -1,0 +1,12 @@
+﻿{
+    "ok":  true,
+    "data":  {
+                 "tenant":  "FIRMA_A",
+                 "sheet_id":  "1KTJ--oYr9FtebnRJtIjS-JxlKiqOmc51sxNNtpcDOug",
+                 "sheet_name":  "Sayfa1",
+                 "date_col":  4,
+                 "phone_col":  3,
+                 "plate_col":  1,
+                 "status_col":  5
+             }
+}

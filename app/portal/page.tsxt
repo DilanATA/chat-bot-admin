@@ -1,0 +1,31 @@
+"use client";
+import { useState } from "react";
+
+export default function PortalLogin() {
+  const [tenant, setTenant] = useState("");
+
+  function enter() {
+    const t = tenant.trim().toUpperCase().replace(/[^A-Z0-9_.-]/g, "");
+    if (!t) { alert("Geçerli bir firma kodu girin"); return; }
+    document.cookie = `tenantId=${t}; path=/; max-age=31536000`;
+    localStorage.setItem("tenantId", t);
+    // Müşteri doğrudan kendi tip ekranına
+    location.href = `/appointment-types?tenant=${encodeURIComponent(t)}`;
+  }
+
+  return (
+    <div style={{ maxWidth: 420, margin: "80px auto", fontFamily: "system-ui" }}>
+      <h1>Müşteri Girişi</h1>
+      <p>Firma kodunuzu girin (örn: FIRMA_A)</p>
+      <input
+        value={tenant}
+        onChange={e => setTenant(e.target.value)}
+        placeholder="FIRMA_XXX"
+        style={{ width: "100%", padding: 10, border: "1px solid #ddd", borderRadius: 8 }}
+      />
+      <button onClick={enter} style={{ marginTop: 12, padding: "10px 16px", borderRadius: 8, background: "#111", color: "#fff", border: "none" }}>
+        Giriş
+      </button>
+    </div>
+  );
+}
