@@ -41,14 +41,6 @@ export function normalizeDate(value: any): Date | null {
   return null;
 }
 
-export function isSameDay(a: Date, b: Date): boolean {
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  );
-}
-
 export function normalizePhoneTR(phone: string): string {
   const digits = phone.replace(/\D+/g, "");
   if (digits.startsWith("90")) return "+" + digits;
@@ -66,3 +58,53 @@ export function isToday(ts: number) {
          d.getDate() === now.getDate();
 }
 
+export function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+export function parseDateFlexible(s: string): Date | null {
+  if (!s) return null;
+  const t = s.trim();
+
+  // ISO: 2025-11-22 / 2025-11-22T...
+  const iso = Date.parse(t);
+  if (!Number.isNaN(iso)) return new Date(iso);
+
+  // 22.11.2025 veya 22/11/2025
+  const m1 = t.match(/^(\d{1,2})[./](\d{1,2})[./](\d{2,4})$/);
+  if (m1) {
+    const d = parseInt(m1[1], 10);
+    const M = parseInt(m1[2], 10) - 1;
+    const y = parseInt(m1[3].length === 2 ? ("20" + m1[3]) : m1[3], 10);
+    const dt = new Date(y, M, d);
+    return Number.isNaN(dt.getTime()) ? null : dt;
+  }
+
+  // 22-11-2025
+  const m2 = t.match(/^(\d{1,2})-(\d{1,2})-(\d{2,4})$/);
+  if (m2) {
+    const d = parseInt(m2[1], 10);
+    const M = parseInt(m2[2], 10) - 1;
+    const y = parseInt(m2[3].length === 2 ? ("20" + m2[3]) : m2[3], 10);
+    const dt = new Date(y, M, d);
+    return Number.isNaN(dt.getTime()) ? null : dt;
+  }
+
+  return null;
+}
+
+export function isSameDay(a: Date, b: Date) {
+  return a.getFullYear() === b.getFullYear() &&
+         a.getMonth() === b.getMonth() &&
+         a.getDate() === b.getDate();
+}
+
+export function isTodayDate(d: Date) {
+  return isSameDay(d, new Date());
+}
+
+export function isTomorrowDate(d: Date) {
+  const t = new Date();
+  t.setDate(t.getDate() + 1);
+  return isSameDay(d, t);
+}

@@ -3,10 +3,10 @@ import "./bootstrapEnv";
 import { listTenants } from "./tenants";
 import { fetchRowsForTenant, updateStatus } from "./sheetsClient";
 import { sendTemplateMessage } from "./whatsapp";
-import { normalizePhoneTR, isToday } from "./utils";
 import { alreadySentToday } from "./dedupe";
 import { db } from "../../lib/db";
 import { logAudit } from "../../lib/audit";
+import { normalizePhoneTR, parseDateFlexible, isTodayDate, isTomorrowDate, sleep } from "./utils";
 
 const TEMPLATE_NAME = process.env.WHATSAPP_TEMPLATE_NAME || "muayene_hatirlatma"; // onaylı olmalı
 
@@ -16,7 +16,10 @@ async function processTenant(tenant: string) {
 
   const rows = await fetchRowsForTenant(ts);
 
-  let total = 0, skippedStatus = 0, skippedDedupe = 0, sent = 0, failed = 0;
+  const filterMode = (process.env.SEND_DATE_FILTER || "today_or_tomorrow").toLowerCase();
+  const throttleMs = Number(process.env.SEND_THROTTLE_MS || 200);
+
+  let total = 0, skippedStatus = 0, skippedDedupe = 0, skippedDate = 0, sent = 0, failed = 0;
 
   for (const row of rows) {
     total++;
@@ -26,22 +29,39 @@ async function processTenant(tenant: string) {
         skippedStatus++; continue;
       }
 
+      // ---- Tarih filtresi ----
+      const parsed = parseDateFlexible(row.dateRaw || "");
+      if (filterMode !== "off") {
+        const pass =
+          parsed &&
+          (filterMode === "today"
+            ? isTodayDate(parsed)
+            : (isTodayDate(parsed) || isTomorrowDate(parsed)));
+        if (!pass) {
+          skippedDate++;
+          continue;
+        }
+      }
+
       const phone = normalizePhoneTR(row.phone);
       if (!phone || phone.length < 10) { skippedStatus++; continue; }
 
       if (alreadySentToday(tenant, phone)) { skippedDedupe++; continue; }
+
+      // ---- Throttle ----
+      if (throttleMs > 0) await sleep(throttleMs);
 
       const result = await sendTemplateMessage({
         phone,
         template: TEMPLATE_NAME,
         lang: "tr",
         bodyParams: [
-          row.name || "-",          // {{1}} Ad Soyad
-          row.plate || "-",         // {{2}} Plaka
-          row.dateRaw || "-"        // {{3}} Tarih (ör. 22.11.2025)
+          // Template param sırası: {{1}} Ad, {{2}} Plaka, {{3}} Tarih
+          (row as any).name || "-",
+          row.plate || "-",
+          row.dateRaw || "-"
         ],
       });
-
 
       if (result.ok) {
         const message_id = result.message_id || null;
@@ -66,8 +86,9 @@ async function processTenant(tenant: string) {
     }
   }
 
-  console.log(`📦 ${tenant} summary → total:${total} sent:${sent} dedupe:${skippedDedupe} skipped:${skippedStatus} failed:${failed}`);
+  console.log(`📦 ${tenant} summary → total:${total} sent:${sent} dedupe:${skippedDedupe} skipped:${skippedStatus} dateSkip:${skippedDate} failed:${failed}`);
 }
+
 
 async function runOnce() {
   const tenants = listTenants();
