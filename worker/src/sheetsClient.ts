@@ -105,3 +105,11 @@ export async function updateStatus(rowIndex: number, status: string) {
 //   const sheet = await getSheet();
 //   await (sheet as any).deleteRows(rowIndex, 1);
 // }
+// ─────────────────────────────────────────────────────────────
+// Geçici wrapper: index.ts fetchRowsForTenant bekliyor.
+// Şimdilik tenant parametresini kullanmadan tüm satırları döndürüyoruz.
+// İleride her tenant için farklı Sheet ID/Title okumak istersen,
+// burayı tenant'a göre sheet seçimi yapacak şekilde genişletebilirsin.
+export async function fetchRowsForTenant(_tenant: string): Promise<CustomerRow[]> {
+  return fetchCustomers();
+}
