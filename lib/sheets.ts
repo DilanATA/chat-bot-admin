@@ -176,7 +176,7 @@ export async function deleteRowInSheet(
   }
 
   // Grid 0-based index ister: rowNumber 1-based olduğu için -1
-  await sheet.deleteRows(rowNumber - 1, 1);
+  await (sheet as any).deleteRows(rowNumber - 1, 1);
 
   return { ok: true, deletedRow: rowNumber };
 }
