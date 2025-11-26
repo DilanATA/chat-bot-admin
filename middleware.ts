@@ -1,32 +1,21 @@
-import { NextRequest, NextResponse } from "next/server";
+// middleware.ts
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 
 export function middleware(req: NextRequest) {
-  const url = new URL(req.url);
+  const p = req.nextUrl.pathname;
+  // Webhook doğrulamasına kesinlikle dokunma
+  if (p.startsWith("/api/webhook")) return NextResponse.next();
 
-  // 1) Öncelik: query (?tenant=FIRMA123)
-  let tenant = url.searchParams.get("tenant")?.trim();
-
-  // 2) Yoksa cookie: tenantId
-  if (!tenant) {
-    const cookieTenant = req.cookies.get("tenantId")?.value?.trim();
-    if (cookieTenant) tenant = cookieTenant;
-  }
-
-  // 3) Yoksa (opsiyonel) subdomain: firma.example.com
-  // Örn: const host = req.headers.get("host") || "";
-  //      tenant = tenant ?? host.split(".")[0];
-
-  const res = NextResponse.next();
-
-  // Tenant varsa header’a koy
-  if (tenant) {
-    res.headers.set("x-tenant-id", tenant);
-  }
-
-  return res;
+  // Diğer yollar için özel bir şey yapmayacaksan:
+  return NextResponse.next();
 }
 
-// Sadece API çağrılarına uygula
+// middleware.ts (varsa)
 export const config = {
-  matcher: ["/api/:path*"],
+  matcher: [
+    // webhook ve migrate hariç
+    "/((?!api/webhook|api/migrate|_next/static|_next/image|favicon.ico).*)",
+  ],
 };
+
