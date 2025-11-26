@@ -1,67 +1,101 @@
+// app/api/customers/[id]/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "../../../../lib/db";
-import { getTenantIdFromSession } from "../../../../lib/auth";
 
-type Params = Promise<{ id: string }>;
+function getTenant(req: NextRequest): string | null {
+  const url = new URL(req.url);
+  const t =
+    url.searchParams.get("tenant") ||
+    req.cookies.get("tenantId")?.value ||
+    "";
+  return t.trim() || null;
+}
 
-export async function PUT(req: NextRequest, { params }: { params: Params }) {
-  const tenantId = await getTenantIdFromSession(req);
-  if (!tenantId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+// ── GET /api/customers/:id
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const tenant = getTenant(req);
+  if (!tenant) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { id: raw } = await params;
-  const seq = Number.parseInt(String(raw ?? "").trim(), 10);
-  if (!Number.isInteger(seq) || seq <= 0) {
-    return NextResponse.json({ error: "Invalid id", received: raw }, { status: 400 });
+  const { id: idStr } = await params;
+  const id = Number.parseInt(String(idStr ?? ""), 10);
+  if (!Number.isInteger(id) || id <= 0) {
+    return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+  }
+
+  const row = db
+    .prepare(
+      `SELECT id, name, phone, plate, date_raw as dateRaw, status
+         FROM customers
+        WHERE id = ? AND tenant_id = ?`
+    )
+    .get(id, tenant);
+
+  if (!row) return NextResponse.json({ error: "Kayıt bulunamadı" }, { status: 404 });
+  return NextResponse.json({ ok: true, data: row });
+}
+
+// ── PUT /api/customers/:id
+export async function PUT(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const tenant = getTenant(req);
+  if (!tenant) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { id: idStr } = await params;
+  const id = Number.parseInt(String(idStr ?? ""), 10);
+  if (!Number.isInteger(id) || id <= 0) {
+    return NextResponse.json({ error: "Invalid id" }, { status: 400 });
   }
 
   const body = await req.json().catch(() => ({}));
-  const name = (body?.name ?? "").trim();
-  const phone = (body?.phone ?? "").trim();
-  const plate = (body?.plate ?? "").trim();
-  const notes = (body?.notes ?? "").trim();
+  const name = String(body?.name ?? "").trim();
+  const phone = String(body?.phone ?? "").trim();
+  const plate = String(body?.plate ?? "").trim();
+  const dateRaw = String(body?.dateRaw ?? "").trim();
+  const status = String(body?.status ?? "").trim();
 
-  if (!name) return NextResponse.json({ error: "Name required" }, { status: 400 });
-  if (!phone) return NextResponse.json({ error: "Phone required" }, { status: 400 });
+  const info = db
+    .prepare(
+      `UPDATE customers
+          SET name = COALESCE(NULLIF(?, ''), name),
+              phone = COALESCE(NULLIF(?, ''), phone),
+              plate = COALESCE(NULLIF(?, ''), plate),
+              date_raw = COALESCE(NULLIF(?, ''), date_raw),
+              status = COALESCE(NULLIF(?, ''), status)
+        WHERE id = ? AND tenant_id = ?`
+    )
+    .run(name, phone, plate, dateRaw, status, id, tenant);
 
-  try {
-    const upd = db.prepare(`
-      UPDATE customers
-      SET name = ?, phone = ?, plate = ?, notes = ?, updated_at = datetime('now')
-      WHERE tenant_id = ? AND customer_seq = ?
-    `).run(name, phone, plate || null, notes || null, tenantId, seq);
-
-    if (upd.changes === 0) return NextResponse.json({ error: "Not found" }, { status: 404 });
-
-    const updated = db.prepare(`
-      SELECT customer_seq AS id, name, phone, plate, notes, created_at AS createdAt, updated_at AS updatedAt
-      FROM customers WHERE tenant_id = ? AND customer_seq = ?
-    `).get(tenantId, seq);
-
-    return NextResponse.json(updated);
-  } catch (e: any) {
-    if (e.code === "SQLITE_CONSTRAINT_UNIQUE") {
-      return NextResponse.json({ error: "Bu telefon bu firmada zaten kayıtlı." }, { status: 409 });
-    }
-    console.error(e);
-    return NextResponse.json({ error: "Internal error" }, { status: 500 });
+  if (info.changes === 0) {
+    return NextResponse.json({ error: "Kayıt bulunamadı" }, { status: 404 });
   }
+  return NextResponse.json({ ok: true });
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: Params }) {
-  const tenantId = await getTenantIdFromSession(req);
-  if (!tenantId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+// ── DELETE /api/customers/:id
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const tenant = getTenant(req);
+  if (!tenant) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { id: raw } = await params;
-  const seq = Number.parseInt(String(raw ?? "").trim(), 10);
-  if (!Number.isInteger(seq) || seq <= 0) {
-    return NextResponse.json({ error: "Invalid id", received: raw }, { status: 400 });
+  const { id: idStr } = await params;
+  const id = Number.parseInt(String(idStr ?? ""), 10);
+  if (!Number.isInteger(id) || id <= 0) {
+    return NextResponse.json({ error: "Invalid id" }, { status: 400 });
   }
 
-  const del = db.prepare(`
-    DELETE FROM customers WHERE tenant_id = ? AND customer_seq = ?
-  `).run(tenantId, seq);
+  const info = db
+    .prepare(`DELETE FROM customers WHERE id = ? AND tenant_id = ?`)
+    .run(id, tenant);
 
-  if (del.changes === 0) return NextResponse.json({ error: "Not found" }, { status: 404 });
-
-  return NextResponse.json({ success: true });
+  if (info.changes === 0) {
+    return NextResponse.json({ error: "Kayıt bulunamadı" }, { status: 404 });
+  }
+  return NextResponse.json({ ok: true });
 }
