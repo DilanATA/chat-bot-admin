@@ -1,126 +1,106 @@
 // app/dashboard/settings/whatsapp/page.tsx
-import "server-only";
-import React from "react";
 
-type SettingsData = {
-  accessToken?: string | null;
-  phoneNumberId?: string | null;
-  businessId?: string | null;
-  verifyToken?: string | null;
-  webhookUrl?: string | null;
+// Sayfayı her istekte dinamik çalıştır (static/export cache devre dışı)
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+type PageProps = {
+  searchParams?: { [key: string]: string | string[] };
 };
 
-export default async function WhatsappSettingsPage({
-  searchParams,
-}: {
-  searchParams: { [k: string]: string | string[] | undefined };
-}) {
-  const sp = searchParams?.tenant;
-  const tenant = (Array.isArray(sp) ? sp[0] : sp) ?? "";
-
-  if (!tenant.trim()) {
-    return (
-      <div className="p-6">
-        <h1 className="text-xl font-semibold mb-3">WhatsApp Ayarları</h1>
-        <div className="rounded-md bg-yellow-100 text-yellow-900 p-4">
-          Tenant seçilmedi. URL’e <code>?tenant=FIRMA_A</code> gibi bir parametre ekleyin.
-        </div>
-      </div>
-    );
-  }
-
-  let ok = false;
-  let data: SettingsData | null = null;
-  let loadError: string | null = null;
-
-  try {
-    // Server Component’te relative fetch kullanabiliriz
-    const res = await fetch(
-      `/api/whatsapp-settings?tenant=${encodeURIComponent(tenant)}`,
-      { cache: "no-store" }
-    );
-
-    if (!res.ok) {
-      loadError = `Ayarlar okunamadı (HTTP ${res.status}).`;
-    } else {
-      const json = (await res.json()) as { ok: boolean; data?: SettingsData; error?: any };
-      ok = json.ok === true;
-      data = json.data ?? null;
-      if (!ok) {
-        loadError = typeof json.error === "string" ? json.error : JSON.stringify(json.error);
-      }
-    }
-  } catch (e: any) {
-    loadError = e?.message || String(e);
-  }
-
-  const initial = {
-    accessToken: data?.accessToken ?? "",
-    phoneNumberId: data?.phoneNumberId ?? "",
-    businessId: data?.businessId ?? "",
-    verifyToken: data?.verifyToken ?? "",
-    webhookUrl: data?.webhookUrl ?? "",
-  };
-
+// Basit bir kart/uyarı UI'si — projendeki tasarıma göre düzenleyebilirsin
+function Alert({ children }: { children: React.ReactNode }) {
   return (
-    <div className="p-6 space-y-4">
-      <h1 className="text-xl font-semibold">WhatsApp Ayarları</h1>
-
-      {!ok && loadError && (
-        <div className="rounded-md bg-red-100 text-red-900 p-4">
-          WhatsApp ayarları yüklenirken hata oluştu: <b>{loadError}</b>
-        </div>
-      )}
-
-      <div className="grid gap-4 max-w-3xl">
-        <Field label="Access Token" value={initial.accessToken} readOnly />
-        <Field label="Phone Number ID" value={initial.phoneNumberId} readOnly />
-        <Field label="Business Account ID" value={initial.businessId} readOnly />
-        <Field label="Verify Token (Webhook)" value={initial.verifyToken} readOnly />
-        <Field
-          label="Webhook URL"
-          value={initial.webhookUrl}
-          readOnly
-          helper="Meta'da Verify & Save yapılmadıysa boş olabilir; bu bir hata değildir."
-        />
-      </div>
-
-      <div className="rounded-md bg-blue-50 text-blue-900 p-4 max-w-3xl">
-        <div className="font-medium mb-1">Hızlı Kontrol</div>
-        <ul className="list-disc pl-5 space-y-1 text-sm">
-          <li>
-            <code>/api/webhook?hub.mode=subscribe&amp;hub.verify_token=...&amp;hub.challenge=9999</code>{" "}
-            çağrısı  <b>9999</b> döndürüyor mu?
-          </li>
-          <li>
-            Test için endpoint: <code>/api/whatsapp-settings/test?tenant={tenant}</code>
-          </li>
-        </ul>
-      </div>
+    <div
+      style={{
+        background: "#fff3cd",
+        color: "#664d03",
+        border: "1px solid #ffecb5",
+        borderRadius: 8,
+        padding: "14px 16px",
+      }}
+    >
+      {children}
     </div>
   );
 }
 
-function Field({
-  label,
-  value,
-  readOnly,
-  helper,
-}: {
-  label: string;
-  value: string;
-  readOnly?: boolean;
-  helper?: string;
-}) {
+export default async function WhatsappSettingsPage({ searchParams }: PageProps) {
+  // URL: ?tenant=FIRMA_A gibi
+  const q = searchParams?.tenant;
+  const tenant = (Array.isArray(q) ? q[0] : q)?.trim() || "";
+
+  // Tenant yoksa sadece uyarı göster
+  if (!tenant) {
+    return (
+      <div style={{ maxWidth: 900, margin: "24px auto", padding: "0 16px" }}>
+        <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 16 }}>
+          WhatsApp Ayarları
+        </h1>
+        <Alert>
+          <b>Tenant seçilmedi.</b> Lütfen URL&apos;e <code>?tenant=FIRMA_A</code>{" "}
+          gibi bir parametre ekleyin.
+        </Alert>
+      </div>
+    );
+  }
+
+  // (İsteğe bağlı) Sunucudan mevcut ayarları çekip forma doldurmak istersen:
+  // Not: cache:'no-store' ile her seferinde güncel veriyi alırız
+  let settings: any = null;
+  try {
+    const res = await fetch(
+      `${process.env.NEXT_PUBLIC_BASE_URL ?? ""}/api/whatsapp-settings?tenant=${encodeURIComponent(
+        tenant
+      )}`,
+      { cache: "no-store" }
+    );
+    if (res.ok) {
+      const json = await res.json();
+      settings = json?.data ?? null;
+    }
+  } catch {
+    // sessizce geç
+  }
+
   return (
-    <div className="flex flex-col gap-1">
-      <label className="text-sm text-gray-500">{label}</label>
-      <input
-        className="rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm"
-        value={value}
-        readOnly={readOnly}
-      />
-      {helper ? <p className="text-xs text-gray-500">{helper}</p> : null}
+    <div style={{ maxWidth: 900, margin: "24px auto", padding: "0 16px" }}>
+      <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 16 }}>
+        WhatsApp Ayarları
+      </h1>
+
+      {/* Tenant başlığı */}
+      <div style={{ margin: "12px 0 20px", opacity: 0.8 }}>
+        Aktif tenant: <code>{tenant}</code>
+      </div>
+
+      {/* Buraya projenin gerçek form bileşenini koyabilirsin.
+          Örneğin: <WhatsappSettingsForm tenant={tenant} initial={settings} /> */}
+      <div
+        style={{
+          border: "1px solid #2a2a2a",
+          borderRadius: 12,
+          padding: 16,
+          background: "#111418",
+        }}
+      >
+        <p style={{ margin: 0, opacity: 0.9 }}>
+          Form bileşenini burada render edin. İstersen geçici olarak
+          ayarları gösteriyorum:
+        </p>
+
+        <pre
+          style={{
+            marginTop: 12,
+            background: "#0b0e12",
+            padding: 12,
+            borderRadius: 8,
+            overflow: "auto",
+          }}
+        >
+{JSON.stringify({ tenant, settings }, null, 2)}
+        </pre>
+      </div>
     </div>
   );
 }
