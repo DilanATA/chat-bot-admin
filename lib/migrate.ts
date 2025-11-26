@@ -1,72 +1,74 @@
 // lib/migrate.ts
-import { db } from "./db";
+// Idempotent (tekrarlı çağrıya güvenli) migrasyonlar.
+// Gereken tablolar yoksa oluşturur; varsa dokunmaz.
 
-const MIGRATIONS: string[] = [
-  // Çok kiracılı genel ayarlar
-  `CREATE TABLE IF NOT EXISTS tenant_settings (
-    tenant TEXT PRIMARY KEY,
-    sheet_id TEXT NOT NULL,
-    sheet_name TEXT NOT NULL,
-    date_col INTEGER NOT NULL,
-    phone_col INTEGER NOT NULL,
-    plate_col INTEGER NOT NULL,
-    status_col INTEGER NOT NULL
-  );`,
+import Database from "better-sqlite3";
+import path from "path";
+import fs from "fs";
 
-  // WhatsApp ayarları (tenant bazlı)
-  `CREATE TABLE IF NOT EXISTS tenant_whatsapp_settings (
-    tenant_id TEXT PRIMARY KEY,
-    access_token TEXT NOT NULL,
-    phone_number_id TEXT NOT NULL,
-    business_id TEXT,
-    verify_token TEXT,
-    webhook_url TEXT,
-    updated_at TEXT
-  );`,
+export function openDb() {
+  // Render Free'de kalıcı disk yoksa /tmp kullanılabilir; projende kendi yolunu tercih et
+  const dbPath =
+    process.env.DB_PATH ||
+    path.join(process.cwd(), "data", "database.sqlite");
 
-  // Randevu tipleri ve randevular (varsa kullanıyoruz)
-  `CREATE TABLE IF NOT EXISTS appointment_types (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    tenant_id TEXT NOT NULL,
-    name TEXT NOT NULL,
-    UNIQUE(tenant_id, name)
-  );`,
+  const dir = path.dirname(dbPath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
-  `CREATE TABLE IF NOT EXISTS appointments (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    tenant_id TEXT NOT NULL,
-    type_id INTEGER,
-    name TEXT,
-    plate TEXT,
-    phone TEXT,
-    date_raw TEXT,
-    status TEXT
-  );`,
-
-  // Mesaj logları
-  `CREATE TABLE IF NOT EXISTS message_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    tenant TEXT,
-    phone TEXT,
-    message_id TEXT,
-    status TEXT,
-    timestamp INTEGER
-  );`,
-
-  // Audit log
-  `CREATE TABLE IF NOT EXISTS audit_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    tenant TEXT,
-    action TEXT,
-    details TEXT,
-    created_at INTEGER
-  );`
-];
-
-export async function migrate(): Promise<void> {
-  const tx = db.transaction(() => {
-    for (const sql of MIGRATIONS) db.prepare(sql).run();
-  });
-  tx();
-  console.log("✅ DB migrations applied.");
+  const db = new Database(dbPath);
+  db.pragma("journal_mode = WAL");
+  return db;
 }
+
+export function migrate(db: Database.Database) {
+  // Tenants (opsiyonel)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS tenants (
+      id TEXT PRIMARY KEY,
+      name TEXT
+    );
+  `);
+
+  // WhatsApp ayarları (kullandığımız alanlar)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS tenant_whatsapp_settings (
+      tenant_id TEXT PRIMARY KEY,
+      access_token TEXT,
+      phone_number_id TEXT,
+      business_id TEXT,
+      verify_token TEXT,
+      webhook_url TEXT
+    );
+  `);
+
+  // Eski kodların ihtiyaç duyduğu olası tablolar (no such table hataları için güvenlik amaçlı)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS tenant_settings (
+      tenant_id TEXT PRIMARY KEY,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS message_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id TEXT,
+      to_phone TEXT,
+      payload TEXT,
+      result TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+}
+
+// Opsiyonel: import edildiğinde otomatik çalışsın (server-start)
+(function auto() {
+  try {
+    const db = openDb();
+    migrate(db);
+    // db'yi açık tutmak istiyorsan export edip paylaşabilirsin; burada kapatmıyoruz.
+  } catch (e) {
+    // Migrasyon hatası build'i bozmasın; loglayıp geç
+    console.error("Migration error:", e);
+  }
+})();

@@ -1,203 +1,139 @@
-"use client";
+// app/dashboard/settings/whatsapp/page.tsx
+import "server-only";
+import React from "react";
+import { cookies } from "next/headers";
 
-import { useEffect, useState } from "react";
-
-type WhatsappSettings = {
-  accessToken: string;
-  phoneNumberId: string;
-  businessId: string;
-  verifyToken: string;
+type SettingsData = {
+  accessToken?: string | null;
+  phoneNumberId?: string | null;
+  businessId?: string | null;
+  verifyToken?: string | null;
+  webhookUrl?: string | null; // null gelebilir - bu hata değildir!
 };
 
-export default function WhatsappSettingsPage() {
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [testTo, setTestTo] = useState("");
-  const [values, setValues] = useState<WhatsappSettings>({
-    accessToken: "",
-    phoneNumberId: "",
-    businessId: "",
-    verifyToken: "",
-  });
+function getTenant(searchParams: { [k: string]: string | string[] | undefined }) {
+  const sp = searchParams?.tenant;
+  const fromQuery = Array.isArray(sp) ? sp[0] : sp;
+  const fromCookie = cookies().get("tenantId")?.value;
+  return (fromQuery || fromCookie || "").trim() || null;
+}
 
-  // Mevcut sayfadaki tüm query string'i (tenant=FIRMA_A gibi) her isteğe eklemek için:
-  const qs =
-    typeof window !== "undefined" && window.location.search
-      ? window.location.search
-      : "";
+export default async function WhatsappSettingsPage({
+  searchParams,
+}: {
+  searchParams: { [k: string]: string | string[] | undefined };
+}) {
+  const tenant = getTenant(searchParams);
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const res = await fetch(`/api/whatsapp-settings${qs}`);
-        const json = await res.json();
-        if (json?.data) {
-          setValues({
-            accessToken: json.data.accessToken ?? "",
-            phoneNumberId: json.data.phoneNumberId ?? "",
-            businessId: json.data.businessId ?? "",
-            verifyToken: json.data.verifyToken ?? "",
-          });
-        }
-      } catch (e) {
-        console.error("Load settings error:", e);
-        alert("WhatsApp ayarları yüklenirken hata oluştu.");
-      } finally {
-        setLoading(false);
+  // Tenant yoksa uyarı verelim (UI hata gibi davranmasın).
+  if (!tenant) {
+    return (
+      <div className="p-6">
+        <h1 className="text-xl font-semibold mb-3">WhatsApp Ayarları</h1>
+        <div className="rounded-md bg-yellow-100 text-yellow-900 p-4">
+          Tenant seçilmedi. URL’e <code>?tenant=FIRMA_A</code> gibi bir parametre ekleyin.
+        </div>
+      </div>
+    );
+  }
+
+  // API'den ayarları çekiyoruz. (cache:no-store => her defasında güncel)
+  let ok = false;
+  let data: SettingsData | null = null;
+  let loadError: string | null = null;
+
+  try {
+    const res = await fetch(
+      `${process.env.NEXT_PUBLIC_BASE_URL ?? ""}/api/whatsapp-settings?tenant=${encodeURIComponent(
+        tenant
+      )}`,
+      { cache: "no-store" }
+    );
+
+    if (!res.ok) {
+      // HTTP seviyesinde hata
+      loadError = `Ayarlar okunamadı (HTTP ${res.status}).`;
+    } else {
+      const json = (await res.json()) as { ok: boolean; data?: SettingsData; error?: any };
+      ok = json.ok === true;
+      data = json.data ?? null;
+
+      if (!ok) {
+        // API ok:false döndüyse gerçek mesajı göster
+        loadError = typeof json.error === "string" ? json.error : JSON.stringify(json.error);
       }
-    };
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // ilk renderda yüklensin
-
-  const handleChange =
-    (field: keyof WhatsappSettings) =>
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      setValues((prev) => ({ ...prev, [field]: e.target.value }));
-    };
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      const res = await fetch(`/api/whatsapp-settings${qs}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(values),
-      });
-      if (!res.ok) {
-        const t = await res.text();
-        throw new Error(t || "Save failed");
-      }
-      alert("Kaydedildi ✅");
-    } catch (e) {
-      console.error(e);
-      alert("Ayarlar kaydedilirken hata oluştu.");
-    } finally {
-      setSaving(false);
     }
+  } catch (e: any) {
+    loadError = e?.message || String(e);
+  }
+
+  // NOT: webhookUrl null olabilir; bu "hata" değildir. Sadece Meta’da Verify&Save yapılmamıştır.
+  // Bu yüzden ok===true ise Uİ’de "hata" gösterME!
+  const initial = {
+    accessToken: data?.accessToken ?? "",
+    phoneNumberId: data?.phoneNumberId ?? "",
+    businessId: data?.businessId ?? "",
+    verifyToken: data?.verifyToken ?? "",
+    webhookUrl: data?.webhookUrl ?? "", // null ise boş string
   };
-
-  const handleTest = async () => {
-    if (!testTo.trim()) {
-      alert("Test için telefon numarası gir (+905xx...)");
-      return;
-    }
-    setTesting(true);
-    try {
-      const res = await fetch(`/api/whatsapp-settings/test${qs}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to: testTo.trim() }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.ok) {
-        console.error("TEST RESP:", json);
-        alert("Test başarısız. Token/numara/izinleri kontrol et.");
-        return;
-      }
-      alert("Test mesajı gönderildi 🎉");
-    } catch (e) {
-      console.error(e);
-      alert("Test sırasında beklenmeyen hata.");
-    } finally {
-      setTesting(false);
-    }
-  };
-
-  const webhookUrl =
-    typeof window !== "undefined"
-      ? `${window.location.origin}/api/webhook`
-      : "";
 
   return (
-    <div className="max-w-3xl space-y-6">
-      <h1 className="text-2xl font-bold">WhatsApp Ayarları</h1>
+    <div className="p-6 space-y-4">
+      <h1 className="text-xl font-semibold">WhatsApp Ayarları</h1>
 
-      <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
-        <h2 className="mb-4 text-lg font-semibold">API Bilgileri</h2>
+      {/* Sadece ok=false ise hata bandı göster */}
+      {!ok && loadError && (
+        <div className="rounded-md bg-red-100 text-red-900 p-4">
+          WhatsApp ayarları yüklenirken hata oluştu: <b>{loadError}</b>
+        </div>
+      )}
 
-        {loading ? (
-          <div>Yükleniyor...</div>
-        ) : (
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm mb-1">Access Token</label>
-              <input
-                type="password"
-                value={values.accessToken}
-                onChange={handleChange("accessToken")}
-                placeholder="EAAG..."
-                className="w-full rounded border border-gray-600 bg-gray-900 p-2"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm mb-1">Phone Number ID</label>
-              <input
-                value={values.phoneNumberId}
-                onChange={handleChange("phoneNumberId")}
-                placeholder="123456789012345"
-                className="w-full rounded border border-gray-600 bg-gray-900 p-2"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm mb-1">Business Account ID</label>
-              <input
-                value={values.businessId}
-                onChange={handleChange("businessId")}
-                placeholder="123456789012345"
-                className="w-full rounded border border-gray-600 bg-gray-900 p-2"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm mb-1">Verify Token (Webhook)</label>
-              <input
-                value={values.verifyToken}
-                onChange={handleChange("verifyToken")}
-                placeholder="secret-verify-token"
-                className="w-full rounded border border-gray-600 bg-gray-900 p-2"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm mb-1">Webhook URL</label>
-              <div className="rounded border border-gray-600 bg-gray-900 p-2 text-sm">
-                {webhookUrl}
-              </div>
-              <p className="text-xs text-gray-400 mt-1">
-                Bu adresi Meta Developer panelinde webhook URL’i olarak kullan.
-              </p>
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                onClick={handleSave}
-                disabled={saving || loading}
-                className="rounded bg-blue-600 px-4 py-2 hover:bg-blue-700 disabled:opacity-60"
-              >
-                {saving ? "Kaydediliyor..." : "Kaydet"}
-              </button>
-
-              <input
-                className="w-48 rounded border border-gray-600 bg-gray-900 p-2"
-                placeholder="+905xxxxxxxxx"
-                value={testTo}
-                onChange={(e) => setTestTo(e.target.value)}
-              />
-              <button
-                onClick={handleTest}
-                disabled={testing || loading}
-                className="rounded border border-gray-500 px-4 py-2 hover:bg-gray-700 disabled:opacity-60"
-              >
-                {testing ? "Test Gönderiliyor..." : "Test Mesajı Gönder"}
-              </button>
-            </div>
-          </div>
-        )}
+      <div className="grid gap-4 max-w-3xl">
+        <Field label="Access Token" value={initial.accessToken} readOnly />
+        <Field label="Phone Number ID" value={initial.phoneNumberId} readOnly />
+        <Field label="Business Account ID" value={initial.businessId} readOnly />
+        <Field label="Verify Token (Webhook)" value={initial.verifyToken} readOnly />
+        <Field label="Webhook URL" value={initial.webhookUrl} readOnly helper="Meta Developer panelinde 'Verify and save' yaptıktan sonra dolacaktır. Boş olması hata değildir." />
       </div>
+
+      <div className="rounded-md bg-blue-50 text-blue-900 p-4 max-w-3xl">
+        <div className="font-medium mb-1">Hızlı Kontrol</div>
+        <ul className="list-disc pl-5 space-y-1 text-sm">
+          <li>
+            <code>/api/webhook?hub.mode=subscribe&amp;hub.verify_token=...&amp;hub.challenge=9999</code>{" "}
+            çağrısı  <b>9999</b> döndürüyorsa webhook doğrulaması hazır demektir.
+          </li>
+          <li>
+            Test gönderimi için endpoint:{" "}
+            <code>/api/whatsapp-settings/test?tenant={tenant}</code>
+          </li>
+          <li>Bu sayfa sadece ayarları okur. Kaydetme/düzenleme Uİ’si sizde ayrı bir komponentse onu kullanmaya devam edin.</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  value,
+  readOnly,
+  helper,
+}: {
+  label: string;
+  value: string;
+  readOnly?: boolean;
+  helper?: string;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-sm text-gray-500">{label}</label>
+      <input
+        className="rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm"
+        value={value}
+        readOnly={readOnly}
+      />
+      {helper ? <p className="text-xs text-gray-500">{helper}</p> : null}
     </div>
   );
 }
