@@ -1,9 +1,8 @@
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 export const revalidate = 0;
-export const runtime = 'nodejs';
+export const runtime = "nodejs";
 
 import { NextRequest, NextResponse } from "next/server";
-import { getTenantIdFromSession } from "@/lib/auth"; // bu fonksiyon string döndürüyorsa sorun yok
 import {
   getWhatsappSettings,
   upsertWhatsappSettings,
@@ -11,16 +10,24 @@ import {
 } from "@/lib/whatsapp-settings";
 
 export async function GET(req: NextRequest) {
-  const tenant = await getTenantIdFromSession(req); // string bekliyoruz: "FIRMA_A"
-  if (!tenant) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { searchParams } = new URL(req.url);
+  const tenant = searchParams.get("tenant");
+
+  if (!tenant) {
+    return NextResponse.json({ error: "Missing tenant parameter" }, { status: 400 });
+  }
 
   const settings = getWhatsappSettings(tenant);
-  return NextResponse.json({ ok: true, data: settings });
+  return NextResponse.json({ ok: true, data: settings ?? null });
 }
 
 export async function POST(req: NextRequest) {
-  const tenant = await getTenantIdFromSession(req);
-  if (!tenant) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { searchParams } = new URL(req.url);
+  const tenant = searchParams.get("tenant");
+
+  if (!tenant) {
+    return NextResponse.json({ error: "Missing tenant parameter" }, { status: 400 });
+  }
 
   const body = (await req.json()) as Partial<WhatsappSettings>;
   const cleaned: WhatsappSettings = {
