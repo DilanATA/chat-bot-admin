@@ -1,8 +1,8 @@
 // lib/migrate.ts
 import { db } from "./db";
 
-const MIGRATIONS = [
-  // Her tenant için Sheets ayarları
+const MIGRATIONS: string[] = [
+  // Çok kiracılı genel ayarlar
   `CREATE TABLE IF NOT EXISTS tenant_settings (
     tenant TEXT PRIMARY KEY,
     sheet_id TEXT NOT NULL,
@@ -11,6 +11,36 @@ const MIGRATIONS = [
     phone_col INTEGER NOT NULL,
     plate_col INTEGER NOT NULL,
     status_col INTEGER NOT NULL
+  );`,
+
+  // WhatsApp ayarları (tenant bazlı)
+  `CREATE TABLE IF NOT EXISTS tenant_whatsapp_settings (
+    tenant_id TEXT PRIMARY KEY,
+    access_token TEXT NOT NULL,
+    phone_number_id TEXT NOT NULL,
+    business_id TEXT,
+    verify_token TEXT,
+    webhook_url TEXT,
+    updated_at TEXT
+  );`,
+
+  // Randevu tipleri ve randevular (varsa kullanıyoruz)
+  `CREATE TABLE IF NOT EXISTS appointment_types (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    UNIQUE(tenant_id, name)
+  );`,
+
+  `CREATE TABLE IF NOT EXISTS appointments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL,
+    type_id INTEGER,
+    name TEXT,
+    plate TEXT,
+    phone TEXT,
+    date_raw TEXT,
+    status TEXT
   );`,
 
   // Mesaj logları
@@ -23,35 +53,20 @@ const MIGRATIONS = [
     timestamp INTEGER
   );`,
 
-  // Audit logları
+  // Audit log
   `CREATE TABLE IF NOT EXISTS audit_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     tenant TEXT,
     action TEXT,
     details TEXT,
     created_at INTEGER
-  );`,
-
-  // ✅ YENİ: WhatsApp API ayarları (her tenant için 1 kayıt)
-  `CREATE TABLE IF NOT EXISTS tenant_whatsapp_settings (
-    tenant TEXT PRIMARY KEY,
-    access_token TEXT,
-    phone_number_id TEXT,
-    business_id TEXT,
-    verify_token TEXT,
-    created_at INTEGER,
-    updated_at INTEGER
-  );`,
+  );`
 ];
 
-function run() {
+export async function migrate(): Promise<void> {
   const tx = db.transaction(() => {
-    for (const sql of MIGRATIONS) {
-      db.prepare(sql).run();
-    }
+    for (const sql of MIGRATIONS) db.prepare(sql).run();
   });
   tx();
-  console.log("✅ Migrations applied.");
+  console.log("✅ DB migrations applied.");
 }
-
-run();
