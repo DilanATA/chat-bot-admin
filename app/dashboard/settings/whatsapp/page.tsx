@@ -1,9 +1,10 @@
 "use client";
 
+import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
-export default function WhatsappSettingsPage() {
+function WhatsappSettingsInner() {
   const searchParams = useSearchParams();
   const [tenant, setTenant] = useState<string | null>(null);
   const [settings, setSettings] = useState<any>(null);
@@ -19,7 +20,7 @@ export default function WhatsappSettingsPage() {
         )}`,
         { cache: "no-store" }
       )
-        .then((res) => res.ok && res.json())
+        .then((res) => (res.ok ? res.json() : null))
         .then((json) => setSettings(json?.data ?? null))
         .catch(() => {});
     }
@@ -82,5 +83,14 @@ export default function WhatsappSettingsPage() {
         </pre>
       </div>
     </div>
+  );
+}
+
+// ✅ Suspense boundary ekliyoruz
+export default function WhatsappSettingsPage() {
+  return (
+    <Suspense fallback={<div style={{ padding: 20 }}>Yükleniyor...</div>}>
+      <WhatsappSettingsInner />
+    </Suspense>
   );
 }
