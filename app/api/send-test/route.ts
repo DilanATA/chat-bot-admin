@@ -1,32 +1,52 @@
-import { NextResponse } from "next/server";
-import { writeLog } from "@worker/src/log";
-import { fetchCustomers, updateStatus } from "@worker/src/sheetsClient";
-import { sendMuayeneReminder } from "@worker/src/whatsapp";
+import { NextRequest, NextResponse } from "next/server";
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-
     const { phone, name, plate, dateRaw } = body;
 
-    // WhatsApp gönderimi
-    const result = await sendMuayeneReminder({
-      to: phone,
-      name,
-      plate,
-      dateText: dateRaw,
-      templateName: process.env.WA_TEMPLATE_NAME!,
-      lang: process.env.WA_TEMPLATE_LANG!,
+    if (!phone) {
+      return NextResponse.json(
+        { ok: false, error: "'phone' gerekli" },
+        { status: 400 }
+      );
+    }
+
+    // İçeriden /api/whatsapp'a proxy et
+    const origin =
+      process.env.NEXT_PUBLIC_API_URL || new URL(req.url).origin;
+
+    const templateName =
+      process.env.WA_TEMPLATE_NAME?.trim() || "hello_world";
+    const templateLanguage =
+      process.env.WA_TEMPLATE_LANG?.trim() || "en_US";
+
+    // İlk temas için template gönderiyoruz
+    const res = await fetch(`${origin}/api/whatsapp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to: String(phone).trim(),
+        type: "template",
+        templateName,
+        templateLanguage,
+        // isterseniz içerik/log amaçlı metadata da gönderebilirsiniz:
+        // tenant, name, plate, dateRaw ...
+      }),
     });
 
-    // Log yaz
-    await writeLog(`📤 Test Gönder → ${phone}`);
+    const data = await res.json();
+    if (!res.ok || !data?.ok) {
+      return NextResponse.json(
+        { ok: false, error: "send-test failed", details: data },
+        { status: res.status || 500 }
+      );
+    }
 
-    return NextResponse.json({ success: true, data: result });
+    return NextResponse.json({ ok: true, data }, { status: 200 });
   } catch (err: any) {
-    await writeLog(`❌ send-test hata: ${err.message}`);
     return NextResponse.json(
-      { success: false, error: err.message },
+      { ok: false, error: err?.message || "Unexpected error" },
       { status: 500 }
     );
   }

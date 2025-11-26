@@ -8,7 +8,6 @@ import { useEffect } from "react";
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
 
-  // --- Basit Auth Kontrolü ---
   useEffect(() => {
     const logged = localStorage.getItem("logged_in");
     if (logged !== "yes") {
@@ -18,7 +17,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="flex h-screen bg-gray-900 text-white">
-      
       {/* Sol Menü */}
       <aside className="w-60 bg-gray-800 p-4 flex flex-col space-y-4">
         <h2 className="text-xl font-bold mb-4">Admin Panel</h2>
@@ -37,6 +35,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         <Link href="/dashboard/settings" className="hover:text-blue-400">
           ⚙️ Ayarlar
+        </Link>
+
+        {/* ✅ Buraya ekle */}
+        <Link href="/dashboard/settings/whatsapp" className="hover:text-blue-400">
+          💬 WhatsApp Ayarları
         </Link>
 
         <button

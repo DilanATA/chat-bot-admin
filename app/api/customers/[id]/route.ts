@@ -1,9 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "../../../../lib/db";
 import { getTenantIdFromSession } from "../../../../lib/auth";
-import { migrate } from "../../../../lib/migrate";
-
-migrate();
 
 type Params = Promise<{ id: string }>;
 
