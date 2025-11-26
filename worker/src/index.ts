@@ -11,7 +11,6 @@ import { writeLog as log } from "./log";
 
 // ENV kontrolleri / varsayılanlar
 const FILTER_MODE = (process.env.SEND_DATE_FILTER || "today_or_tomorrow").toLowerCase();
-// withinDays: today_or_tomorrow => 1, only_today => 0, next_3_days => 3, next_7_days => 7
 function resolveWithinDays(mode: string): number {
   switch (mode) {
     case "only_today": return 0;
@@ -23,14 +22,30 @@ function resolveWithinDays(mode: string): number {
 }
 const WITHIN_DAYS = resolveWithinDays(FILTER_MODE);
 const INCLUDE_TODAY = FILTER_MODE !== "only_today";
+const THROTTLE_MS = Number(process.env.SEND_THROTTLE_MS || 200);
 
-const THROTTLE_MS = Number(process.env.SEND_THROTTLE_MS || 200); // iki mesaj arası bekleme
+// Gelen item string ise direkt, obje ise yaygın alanlardan çek
+function toTenantId(x: unknown): string {
+  if (typeof x === "string") return x;
+  const obj = x as any;
+  return (
+    obj?.tenant ??
+    obj?.tenant_id ??
+    obj?.tenantId ??
+    obj?.id ??
+    ""
+  );
+}
 
 async function runOnceForTenant(tenant: string) {
+  if (!tenant) {
+    log("⚠️  tenant boş geldi; atlanıyor.");
+    return;
+  }
+
   log(`➡️  [${tenant}] fetchRowsForTenant...`);
   const rows = await fetchRowsForTenant(tenant);
 
-  // Filtre & sırala
   const dueList: Customer[] = filterDueCustomers(rows as Customer[], {
     withinDays: WITHIN_DAYS,
     includeToday: INCLUDE_TODAY,
@@ -42,24 +57,21 @@ async function runOnceForTenant(tenant: string) {
   for (let i = 0; i < ordered.length; i++) {
     const c = ordered[i];
 
-    // Aynı güne iki kez gitmesin – alreadySentToday(tenant, phone) bekliyor
+    // Aynı güne iki kez gitmesin – alreadySentToday(tenant, phone)
     if (alreadySentToday(tenant, c.phone)) {
       log(`⏭️  [${tenant}] ${c.phone} için bugün zaten gönderilmiş; atlanıyor.`);
       continue;
     }
 
-    // Template body parametreleri (örnek: [Ad, Plaka, Tarih])
     const bodyParams = [c.name || "Müşteri", c.plate || "-", c.dateRaw || "-"];
 
     const res = await sendTemplateMessage({
       phone: c.phone,
       bodyParams,
-      // template/lang env'den geliyor: WA_TEMPLATE_NAME / WA_TEMPLATE_LANG
     });
 
     if (res.ok) {
       log(`✅  [${tenant}] gönderildi: ${c.phone} (msg: ${res.message_id || "-"})`);
-      // rows listesinde aynı satırı bulup "GÖNDERİLDİ" yazalım
       try {
         const idx = rows.findIndex(
           (r) => r.phone === c.phone && r.plate === c.plate && r.dateRaw === c.dateRaw
@@ -81,19 +93,19 @@ async function runOnceForTenant(tenant: string) {
 }
 
 export async function runOnceAllTenants() {
-  const tenants = await listTenants(); // ["FIRMA_A", ...] bekleniyor
+  const tenants = await listTenants(); // string[] veya obje[]
   for (const t of tenants) {
+    const tenant = toTenantId(t);
     try {
-      await runOnceForTenant(t);
+      await runOnceForTenant(tenant);
     } catch (e) {
-      log(`❌  [${t}] runOnce hata: ${(e as Error).message}`);
+      log(`❌  [${tenant || "?"}] runOnce hata: ${(e as Error).message}`);
     }
   }
 }
 
-// Scheduler – varsayılan: açık (WORKER_MODE=schedule)
+// Scheduler – varsayılan: açık
 if ((process.env.WORKER_MODE || "schedule").toLowerCase() === "schedule") {
-  // Her saat başı
   cron.schedule("0 * * * *", async () => {
     try {
       log("⏰  CRON tick: runOnceAllTenants()");
