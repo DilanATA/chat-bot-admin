@@ -2,12 +2,16 @@
 import dayjs from "dayjs";
 import customParseFormat from "dayjs/plugin/customParseFormat";
 
-// ❌ Eski: import { Customer } from './sheetsClient';
-// ✅ Yeni: CustomerRow tipini import edip Customer olarak alias’lıyoruz
-import type { CustomerRow } from "./sheetsClient";
-type Customer = CustomerRow;
-
 dayjs.extend(customParseFormat);
+
+// Bu dosyada ihtiyacımız olan minimal tip:
+export type Customer = {
+  plate: string;
+  name: string;
+  phone: string;
+  dateRaw: string;
+  status?: string;
+};
 
 /**
  * Tarih string'ini (ör. "2025-11-30", "30.11.2025", "30/11/2025") parse eder.
@@ -35,7 +39,7 @@ export function parseDateFlexible(input: string): Date | null {
 }
 
 /**
- * Bir müşterinin (Customer) randevu/son tarihinin bugün veya geçmiş olup olmadığını söyler.
+ * Bir müşterinin randevu/son tarihi bugün ya da geçmiş mi?
  */
 export function isDueOrOverdue(cus: Customer, today = new Date()): boolean {
   const d = parseDateFlexible(cus.dateRaw);
@@ -46,8 +50,7 @@ export function isDueOrOverdue(cus: Customer, today = new Date()): boolean {
 }
 
 /**
- * Son X gün içinde (ör. 7 gün) yaklaşanlar.
- * includeToday: true ise bugün olanları da dahil eder.
+ * Son X gün içinde yaklaşanlar (opsiyonel: bugünü dahil etme)
  */
 export function isDueWithinDays(
   cus: Customer,
@@ -60,7 +63,6 @@ export function isDueWithinDays(
 
   const start = new Date(today);
   if (!includeToday) {
-    // Bugünü dışlarsak, başlangıcı yarın yap
     start.setDate(start.getDate() + 1);
     start.setHours(0, 0, 0, 0);
   }
@@ -73,7 +75,7 @@ export function isDueWithinDays(
 }
 
 /**
- * Liste filtreleri — iş kuralları burada toplanır
+ * Liste filtreleri — iş kuralları burada
  */
 export function filterDueCustomers(
   list: Customer[],
