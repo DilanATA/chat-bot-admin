@@ -1,96 +1,73 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getTenantIdFromSession } from "@/lib/auth";
+// app/api/whatsapp-settings/test/route.ts
+import { NextResponse } from "next/server";
 import { getWhatsappSettings } from "@/lib/whatsapp-settings";
 
-type Body = {
-  to?: string;
-  // UI'dan geliyorsa buraya formdaki değerleri ekliyoruz (opsiyonel)
-  settings?: {
-    accessToken?: string;
-    phoneNumberId?: string;
-    businessId?: string;
-    verifyToken?: string;
-  };
+type ThinSettings = {
+  accessToken?: string;
+  phoneNumberId?: string;
+  businessId?: string;
+  verifyToken?: string;
 };
 
-export async function POST(req: NextRequest) {
-  const tenant = await getTenantIdFromSession(req); // "FIRMA_A" gibi string bekliyoruz
-  const body = (await req.json()) as Body;
-
-  const to = body.to?.trim();
-  if (!to) {
-    return NextResponse.json(
-      { ok: false, error: "'to' (alıcı) gerekli" },
-      { status: 400 }
-    );
-  }
-
-  // 1) Öncelik: client'tan gelen ayarlar
-  let s = body.settings;
-
-  // 2) Yoksa DB'den çek
-  if (!s?.accessToken || !s?.phoneNumberId) {
-    if (!tenant) {
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+    const to: string = String(body?.to || "").trim();
+    if (!to) {
       return NextResponse.json(
-        { ok: false, error: "Tenant bulunamadı" },
-        { status: 401 }
-      );
-    }
-    const fromDb = getWhatsappSettings(tenant);
-    if (!fromDb) {
-      return NextResponse.json(
-        { ok: false, error: "WhatsApp ayarları bulunamadı" },
+        { ok: false, error: "Parametre 'to' (E.164 tel) zorunlu." },
         { status: 400 }
       );
     }
-    s = fromDb;
-  }
 
-  const apiVersion = process.env.WHATSAPP_API_VERSION ?? "v21.0";
-  const url = `https://graph.facebook.com/${apiVersion}/${s.phoneNumberId}/messages`;
+    // (Şimdilik sabit tenant; istersen header/cookie/query'den de alabiliriz)
+    const tenant = "FIRMA_A";
 
-  // 🔴 İLK MESAJ için her zaman TEMPLATE kullan (hello_world)
-  const payload = {
-    messaging_product: "whatsapp",
-    to,
-    type: "template",
-    template: {
-      name: "hello_world",
-      language: { code: "en_US" }
+    const fromDb = getWhatsappSettings(tenant);
+
+    // 🔧 null -> undefined dönüşümü ile tip uyuşmazlığını gider
+    const s: ThinSettings = fromDb
+      ? {
+          accessToken: fromDb.accessToken,
+          phoneNumberId: fromDb.phoneNumberId,
+          businessId: fromDb.businessId ?? undefined,
+          verifyToken: fromDb.verifyToken ?? undefined,
+        }
+      : {};
+
+    if (!s.accessToken || !s.phoneNumberId) {
+      return NextResponse.json(
+        { ok: false, error: "WhatsApp ayarları eksik (token / phoneNumberId)." },
+        { status: 400 }
+      );
     }
-  };
 
-  try {
+    const apiVersion = process.env.WHATSAPP_API_VERSION ?? "v21.0";
+    const url = `https://graph.facebook.com/${apiVersion}/${s.phoneNumberId}/messages`;
+
+    const payload = {
+      messaging_product: "whatsapp",
+      to,
+      type: "template",
+      template: { name: "hello_world", language: { code: "en_US" } },
+    };
+
     const res = await fetch(url, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
         Authorization: `Bearer ${s.accessToken}`,
+        "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
     });
 
     const data = await res.json();
-
-    // Debug log (sunucu konsolunda göreceksin)
-    console.log("➡️ META REQ URL:", url);
-    console.log("➡️ META REQ BODY:", payload);
-    console.log("⬅️ META RES STATUS:", res.status);
-    console.log("⬅️ META RES BODY:", data);
-
     if (!res.ok) {
-      return NextResponse.json(
-        { ok: false, error: "API error", details: data },
-        { status: 400 }
-      );
+      return NextResponse.json({ ok: false, error: "API error", details: data }, { status: 400 });
     }
 
     return NextResponse.json({ ok: true, data });
   } catch (e: any) {
-    console.error("WhatsApp test error", e);
-    return NextResponse.json(
-      { ok: false, error: "Unexpected error", message: e?.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: e?.message || String(e) }, { status: 500 });
   }
 }
