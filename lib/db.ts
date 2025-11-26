@@ -1,22 +1,27 @@
+// lib/db.ts
 import Database from "better-sqlite3";
 import fs from "fs";
 import path from "path";
 
-// PROD'da disk: /data/database.sqlite  | DEV'de proje kökü
-const DB_PATH = process.env.DB_PATH || path.resolve(process.cwd(), "database.sqlite");
+const DB_PATH = process.env.DB_PATH || path.join(process.cwd(), "database.sqlite");
 
-// Diskte klasör yoksa oluştur (örn. /data)
-const dir = path.dirname(DB_PATH);
-if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-
-// Dosya yoksa oluştur
-if (!fs.existsSync(DB_PATH)) {
-  fs.writeFileSync(DB_PATH, "");
-  console.log("📦 Created database file:", DB_PATH);
+declare global {
+  // eslint-disable-next-line no-var
+  var __db: Database.Database | undefined;
 }
 
-export const db = new Database(DB_PATH);
-db.pragma("journal_mode = WAL");
-db.pragma("foreign_keys = ON");
+function open() {
+  const dir = path.dirname(DB_PATH);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
-console.log("🗂️  Using SQLite at:", DB_PATH);
+  const db = new Database(DB_PATH);
+  // Kilitlenmeyi azalt
+  db.pragma("journal_mode = WAL");
+  db.pragma("synchronous = NORMAL");
+  db.pragma("busy_timeout = 5000"); // 5 sn bekle
+
+  return db;
+}
+
+export const db: Database.Database = global.__db ?? open();
+if (!global.__db) global.__db = db;

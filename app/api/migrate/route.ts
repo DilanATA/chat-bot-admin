@@ -1,4 +1,7 @@
 // app/api/migrate/route.ts
+export const revalidate = 0;
+export const runtime = 'nodejs';
+
 import { NextResponse } from "next/server";
 import { migrate } from "@/lib/migrate";
 
