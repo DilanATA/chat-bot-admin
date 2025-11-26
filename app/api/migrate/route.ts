@@ -4,8 +4,8 @@ import { openDb, migrate } from "@/lib/migrate";
 
 export async function GET() {
   try {
-    const db = openDb();   // DB'yi aç
-    migrate(db);           // migrate'e db ver
+    const db = openDb();
+    migrate(db);
     return NextResponse.json({ ok: true });
   } catch (e: any) {
     return NextResponse.json(
