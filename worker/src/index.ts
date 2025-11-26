@@ -1,111 +1,115 @@
-// worker/src/index.ts, dedupe.ts vb.
+// worker/src/index.ts
 import "./bootstrapEnv";
+import cron from "node-cron";
+
 import { listTenants } from "./tenants";
 import { fetchRowsForTenant, updateStatus } from "./sheetsClient";
 import { sendTemplateMessage } from "./whatsapp";
 import { alreadySentToday } from "./dedupe";
-import { db } from "../../lib/db";
-import { logAudit } from "../../lib/audit";
-import { normalizePhoneTR, parseDateFlexible, isTodayDate, isTomorrowDate, sleep } from "./utils";
+import { filterDueCustomers, sortByDateAsc, type Customer } from "./businessRules";
+import { writeLog as log } from "./log";
 
-const TEMPLATE_NAME = process.env.WHATSAPP_TEMPLATE_NAME || "muayene_hatirlatma"; // onaylı olmalı
+// ENV kontrolleri / varsayılanlar
+const FILTER_MODE = (process.env.SEND_DATE_FILTER || "today_or_tomorrow").toLowerCase();
+// withinDays: today_or_tomorrow => 1, only_today => 0, next_7_days => 7, etc.
+function resolveWithinDays(mode: string): number {
+  switch (mode) {
+    case "only_today":
+      return 0;
+    case "today_or_tomorrow":
+      return 1;
+    case "next_3_days":
+      return 3;
+    case "next_7_days":
+      return 7;
+    default:
+      return 1;
+  }
+}
+const WITHIN_DAYS = resolveWithinDays(FILTER_MODE);
+const INCLUDE_TODAY = FILTER_MODE !== "only_today";
 
-async function processTenant(tenant: string) {
-  const ts = listTenants().find(t => t.tenant === tenant);
-  if (!ts) throw new Error(`Tenant ayarı bulunamadı: ${tenant}`);
+const THROTTLE_MS = Number(process.env.SEND_THROTTLE_MS || 200); // iki mesaj arası bekleme
 
-  const rows = await fetchRowsForTenant(ts);
+async function runOnceForTenant(tenant: string) {
+  log(`➡️  [${tenant}] fetchRowsForTenant...`);
+  const rows = await fetchRowsForTenant(tenant); // <<< STRING tenant kullanıyoruz
 
-  const filterMode = (process.env.SEND_DATE_FILTER || "today_or_tomorrow").toLowerCase();
-  const throttleMs = Number(process.env.SEND_THROTTLE_MS || 200);
+  // Filtre & sırala
+  const dueList: Customer[] = filterDueCustomers(rows as Customer[], {
+    withinDays: WITHIN_DAYS,
+    includeToday: INCLUDE_TODAY,
+  });
+  const ordered = sortByDateAsc(dueList);
 
-  let total = 0, skippedStatus = 0, skippedDedupe = 0, skippedDate = 0, sent = 0, failed = 0;
+  log(`ℹ️  [${tenant}] aday sayısı: ${ordered.length}`);
 
-  for (const row of rows) {
-    total++;
-    try {
-      const status = (row.status || "").toUpperCase().trim();
-      if (status.startsWith("GÖNDERİLDİ") || status.startsWith("GONDERILDI") || status.startsWith("OK")) {
-        skippedStatus++; continue;
-      }
+  for (let i = 0; i < ordered.length; i++) {
+    const c = ordered[i];
 
-      // ---- Tarih filtresi ----
-      const parsed = parseDateFlexible(row.dateRaw || "");
-      if (filterMode !== "off") {
-        const pass =
-          parsed &&
-          (filterMode === "today"
-            ? isTodayDate(parsed)
-            : (isTodayDate(parsed) || isTomorrowDate(parsed)));
-        if (!pass) {
-          skippedDate++;
-          continue;
+    // Aynı güne iki kez gitmesin
+    if (alreadySentToday(tenant, c.phone, c.dateRaw)) {
+      log(`⏭️  [${tenant}] ${c.phone} için bugün zaten gönderilmiş; atlanıyor.`);
+      continue;
+    }
+
+    // Template body parametreleri (örnek: [Ad, Plaka, Tarih])
+    const bodyParams = [c.name || "Müşteri", c.plate || "-", c.dateRaw || "-"];
+
+    const res = await sendTemplateMessage({
+      phone: c.phone,
+      bodyParams,
+      // template/lang env'den geliyor: WA_TEMPLATE_NAME / WA_TEMPLATE_LANG
+    });
+
+    if (res.ok) {
+      log(`✅  [${tenant}] gönderildi: ${c.phone} (msg: ${res.message_id || "-"})`);
+      // Not: updateStatus 0-based rowIndex istiyor. fetchRowsForTenant -> fetchCustomers -> getRows()
+      // Sıra numarasını list’e göre kullanıyoruz; burada orijinal index’i bilmiyoruz.
+      // Basit yaklaşım: durum güncellemesi "GÖNDERİLDİ" (veya Türkçe) yapalım.
+      try {
+        const idx = rows.findIndex(
+          (r) => r.phone === c.phone && r.plate === c.plate && r.dateRaw === c.dateRaw
+        );
+        if (idx >= 0) {
+          await updateStatus(idx, "GÖNDERİLDİ");
         }
+      } catch (e) {
+        log(`⚠️  [${tenant}] updateStatus hatası: ${(e as Error).message}`);
       }
+    } else {
+      log(`❌  [${tenant}] gönderim hatası: ${JSON.stringify(res.error).slice(0, 500)}`);
+    }
 
-      const phone = normalizePhoneTR(row.phone);
-      if (!phone || phone.length < 10) { skippedStatus++; continue; }
-
-      if (alreadySentToday(tenant, phone)) { skippedDedupe++; continue; }
-
-      // ---- Throttle ----
-      if (throttleMs > 0) await sleep(throttleMs);
-
-      const result = await sendTemplateMessage({
-        phone,
-        template: TEMPLATE_NAME,
-        lang: "tr",
-        bodyParams: [
-          // Template param sırası: {{1}} Ad, {{2}} Plaka, {{3}} Tarih
-          (row as any).name || "-",
-          row.plate || "-",
-          row.dateRaw || "-"
-        ],
-      });
-
-      if (result.ok) {
-        const message_id = result.message_id || null;
-        db.prepare(
-          "INSERT INTO message_logs (tenant, phone, message_id, status, timestamp) VALUES (?, ?, ?, ?, ?)"
-        ).run(tenant, phone, message_id, "sent", Date.now());
-        logAudit(tenant, "worker.message.sent", { phone, template: TEMPLATE_NAME, message_id });
-
-        const stamp = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" });
-        await updateStatus(ts, row.rowIndex, `GÖNDERİLDİ ${stamp}`);
-        sent++;
-      } else {
-        db.prepare(
-          "INSERT INTO message_logs (tenant, phone, message_id, status, timestamp) VALUES (?, ?, ?, ?, ?)"
-        ).run(tenant, phone, null, "failed", Date.now());
-        logAudit(tenant, "worker.message.failed", { phone, template: TEMPLATE_NAME, error: result.error });
-        failed++;
-      }
-    } catch (e: any) {
-      logAudit(tenant, "worker.row.error", { rowIndex: row.rowIndex, error: e?.message || String(e) });
-      failed++;
+    if (THROTTLE_MS > 0) {
+      await new Promise((r) => setTimeout(r, THROTTLE_MS));
     }
   }
-
-  console.log(`📦 ${tenant} summary → total:${total} sent:${sent} dedupe:${skippedDedupe} skipped:${skippedStatus} dateSkip:${skippedDate} failed:${failed}`);
 }
 
-
-async function runOnce() {
-  const tenants = listTenants();
+export async function runOnceAllTenants() {
+  const tenants = await listTenants(); // ["FIRMA_A", ...] bekleniyor
   for (const t of tenants) {
-    await processTenant(t.tenant);
+    try {
+      await runOnceForTenant(t);
+    } catch (e) {
+      log(`❌  [${t}] runOnce hata: ${(e as Error).message}`);
+    }
   }
 }
 
-const argOnce = process.argv.includes("--once");
-if (argOnce) {
-  runOnce()
-    .then(() => { console.log("✅ Worker once done."); process.exit(0); })
-    .catch((e) => { console.error(e); process.exit(1); });
+// Scheduler devreye alma — isteğe bağlı bir koşul
+if ((process.env.WORKER_MODE || "schedule").toLowerCase() === "schedule") {
+  // Her saat başı çalış (örn. her saat 09:00, 10:00, ...)
+  cron.schedule("0 * * * *", async () => {
+    try {
+      log("⏰  CRON tick: runOnceAllTenants()");
+      await runOnceAllTenants();
+    } catch (e) {
+      log(`❌  CRON error: ${(e as Error).message}`);
+    }
+  });
+  log("🟢  Scheduler aktif (cron: 0 * * * *)");
 } else {
-  // 5 dakikada bir tarasın (MVP)
-  const intervalMs = Number(process.env.WORKER_INTERVAL_MS || 300_000);
-  console.log("⏱️ Worker loop started. Interval(ms):", intervalMs);
-  runOnce().catch(console.error);
-  setInterval(() => runOnce().catch(console.error), intervalMs);
+  log("🟡  Scheduler devre dışı (WORKER_MODE != schedule)");
 }
