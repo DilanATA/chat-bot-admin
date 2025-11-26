@@ -1,11 +1,13 @@
-import { migrate } from "@/lib/migrate";
+// src/app/layout.tsx
+import "./globals.css";
 
-export default function RootLayout({ children }) {
-  // Run DB migrations once
-  migrate();
-
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
-    <html lang="en">
+    <html lang="tr">
       <body>{children}</body>
     </html>
   );
