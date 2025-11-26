@@ -1,67 +1,88 @@
+// app/api/appointment-types/[id]/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { getTenantIdFromSession } from "@/lib/auth";
+import { db } from "../../../../lib/db";
 
-export async function PUT(req: NextRequest, context: { params: Promise<{ id: string }> }) {
-  const tenantId = await getTenantIdFromSession(req);
-  if (!tenantId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+function getTenant(req: NextRequest): string | null {
+  const url = new URL(req.url);
+  const t =
+    url.searchParams.get("tenant") ||
+    req.cookies.get("tenantId")?.value ||
+    "";
+  return t.trim() || null;
+}
 
-  const { id } = await context.params;
-  const parsedId = Number.parseInt(String(id ?? "").trim(), 10);
-  if (!Number.isInteger(parsedId) || parsedId <= 0) {
+// ── GET /api/appointment-types/:id
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const tenant = getTenant(req);
+  if (!tenant) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { id: idStr } = await params;
+  const id = Number.parseInt(String(idStr ?? ""), 10);
+  if (!Number.isInteger(id) || id <= 0) {
+    return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+  }
+
+  const row = db
+    .prepare(`SELECT id, name FROM appointment_types WHERE id = ? AND tenant_id = ?`)
+    .get(id, tenant);
+
+  if (!row) return NextResponse.json({ error: "Kayıt bulunamadı" }, { status: 404 });
+  return NextResponse.json({ ok: true, data: row });
+}
+
+// ── PUT /api/appointment-types/:id
+export async function PUT(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const tenant = getTenant(req);
+  if (!tenant) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { id: idStr } = await params;
+  const id = Number.parseInt(String(idStr ?? ""), 10);
+  if (!Number.isInteger(id) || id <= 0) {
     return NextResponse.json({ error: "Invalid id" }, { status: 400 });
   }
 
   const body = await req.json().catch(() => ({}));
   const name = String(body?.name ?? "").trim();
-  if (!name) return NextResponse.json({ error: "Name required" }, { status: 400 });
+  if (!name) return NextResponse.json({ error: "Name gerekli" }, { status: 400 });
 
-  try {
-    const res = db
-      .prepare(
-        `
-        UPDATE appointment_types
-        SET name = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE tenant_id = ? AND id = ?
-        `
-      )
-      .run(name, tenantId, parsedId);
+  const info = db
+    .prepare(
+      `UPDATE appointment_types SET name = ? WHERE id = ? AND tenant_id = ?`
+    )
+    .run(name, id, tenant);
 
-    if (res.changes === 0) return NextResponse.json({ error: "Not found" }, { status: 404 });
-
-    const row = db
-      .prepare(
-        `
-        SELECT id, name, created_at AS createdAt, updated_at AS updatedAt
-        FROM appointment_types
-        WHERE tenant_id = ? AND id = ?
-        `
-      )
-      .get(tenantId, parsedId);
-
-    return NextResponse.json(row);
-  } catch (e: any) {
-    if (String(e?.message || "").includes("UNIQUE")) {
-      return NextResponse.json({ error: "Bu firmada aynı isim zaten var" }, { status: 409 });
-    }
-    return NextResponse.json({ error: "Update failed" }, { status: 500 });
+  if (info.changes === 0) {
+    return NextResponse.json({ error: "Kayıt bulunamadı" }, { status: 404 });
   }
+  return NextResponse.json({ ok: true });
 }
 
-export async function DELETE(req: NextRequest, context: { params: Promise<{ id: string }> }) {
-  const tenantId = await getTenantIdFromSession(req);
-  if (!tenantId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+// ── DELETE /api/appointment-types/:id
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const tenant = getTenant(req);
+  if (!tenant) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { id } = await context.params;
-  const parsedId = Number.parseInt(String(id ?? "").trim(), 10);
-  if (!Number.isInteger(parsedId) || parsedId <= 0) {
+  const { id: idStr } = await params;
+  const id = Number.parseInt(String(idStr ?? ""), 10);
+  if (!Number.isInteger(id) || id <= 0) {
     return NextResponse.json({ error: "Invalid id" }, { status: 400 });
   }
 
-  const res = db
-    .prepare(`DELETE FROM appointment_types WHERE tenant_id = ? AND id = ?`)
-    .run(tenantId, parsedId);
+  const info = db
+    .prepare(`DELETE FROM appointment_types WHERE id = ? AND tenant_id = ?`)
+    .run(id, tenant);
 
-  if (res.changes === 0) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (info.changes === 0) {
+    return NextResponse.json({ error: "Kayıt bulunamadı" }, { status: 404 });
+  }
   return NextResponse.json({ ok: true });
 }
