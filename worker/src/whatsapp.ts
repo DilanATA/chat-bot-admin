@@ -103,6 +103,8 @@ export async function sendTemplateMessage(opts: SendTemplateOpts): Promise<SendR
     return { ok: false, error: api };
   }
 }
+export { sendTemplateMessage as sendMuayeneReminder };
+
 
 /**
  * Eski özel sarmalayıcının yerine, aynı davranışı tek satırla yap:
