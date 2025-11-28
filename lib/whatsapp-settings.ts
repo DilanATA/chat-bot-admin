@@ -1,5 +1,5 @@
-// lib/whatsapp-settings.ts
-import { db } from "./db";
+import fs from "fs";
+import path from "path";
 
 export type WhatsappSettings = {
   accessToken: string;
@@ -9,47 +9,56 @@ export type WhatsappSettings = {
   webhookUrl?: string | null;
 };
 
-export function getWhatsappSettings(tenantId: string): WhatsappSettings | null {
-  const row = db.prepare(
-    `
-    SELECT
-      access_token   AS accessToken,
-      phone_number_id AS phoneNumberId,
-      business_id    AS businessId,
-      verify_token   AS verifyToken,
-      webhook_url    AS webhookUrl
-    FROM tenant_whatsapp_settings
-    WHERE tenant_id = ?
-    `
-  ).get(tenantId);
+const FILE_PATH =
+  process.env.NODE_ENV === "production"
+    ? path.join("/tmp", "whatsapp-settings.json") // Render'da yazılabilir tek dizin
+    : path.join(process.cwd(), "data", "whatsapp-settings.json");
 
-  return row ?? null;
+// Yardımcı: dosya yoksa oluştur
+function ensureFile() {
+  try {
+    if (!fs.existsSync(FILE_PATH)) {
+      fs.mkdirSync(path.dirname(FILE_PATH), { recursive: true });
+      fs.writeFileSync(FILE_PATH, "{}", "utf8");
+    }
+  } catch (err) {
+    console.error("⚠️ ensureFile error:", err);
+  }
+}
+
+function loadAll(): Record<string, WhatsappSettings> {
+  ensureFile();
+  try {
+    const raw = fs.readFileSync(FILE_PATH, "utf8");
+    return JSON.parse(raw || "{}");
+  } catch (err) {
+    console.error("⚠️ loadAll error:", err);
+    return {};
+  }
+}
+
+function saveAll(data: Record<string, WhatsappSettings>) {
+  try {
+    fs.writeFileSync(FILE_PATH, JSON.stringify(data, null, 2), "utf8");
+  } catch (err) {
+    console.error("⚠️ saveAll error:", err);
+  }
+}
+
+export function getWhatsappSettings(tenantId: string): WhatsappSettings | null {
+  const all = loadAll();
+  return all[tenantId] ?? null;
 }
 
 export function upsertWhatsappSettings(tenantId: string, s: WhatsappSettings) {
-  const now = new Date().toISOString();
-  db.prepare(
-    `
-    INSERT INTO tenant_whatsapp_settings
-      (tenant_id, access_token, phone_number_id, business_id, verify_token, webhook_url, updated_at)
-    VALUES
-      (?,         ?,           ?,              ?,           ?,            ?,           ?)
-    ON CONFLICT(tenant_id) DO UPDATE SET
-      access_token    = excluded.access_token,
-      phone_number_id = excluded.phone_number_id,
-      business_id     = excluded.business_id,
-      verify_token    = excluded.verify_token,
-      webhook_url     = excluded.webhook_url,
-      updated_at      = excluded.updated_at
-    `
-  ).run(
-    tenantId,
-    s.accessToken,
-    s.phoneNumberId,
-    s.businessId ?? null,
-    s.verifyToken ?? null,
-    s.webhookUrl ?? null,
-    now
-  );
+  const all = loadAll();
+  all[tenantId] = {
+    accessToken: s.accessToken,
+    phoneNumberId: s.phoneNumberId,
+    businessId: s.businessId ?? null,
+    verifyToken: s.verifyToken ?? null,
+    webhookUrl: s.webhookUrl ?? null,
+  };
+  saveAll(all);
   return { ok: true };
 }
