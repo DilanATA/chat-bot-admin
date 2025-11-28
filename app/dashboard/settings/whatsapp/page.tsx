@@ -1,30 +1,51 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+
+type WhatsappSettings = {
+  accessToken: string;
+  phoneNumberId: string;
+  businessId?: string | null;
+  verifyToken?: string | null;
+};
 
 function WhatsappSettingsInner() {
   const searchParams = useSearchParams();
   const [tenant, setTenant] = useState<string | null>(null);
-  const [settings, setSettings] = useState<any>(null);
+  const [settings, setSettings] = useState<WhatsappSettings | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     const t = searchParams.get("tenant");
     setTenant(t);
 
     if (t) {
-      fetch(
-        `${process.env.NEXT_PUBLIC_BASE_URL ?? ""}/api/whatsapp-settings?tenant=${encodeURIComponent(
-          t
-        )}`,
-        { cache: "no-store" }
-      )
+      fetch(`/api/whatsapp-settings?tenant=${encodeURIComponent(t)}`)
         .then((res) => (res.ok ? res.json() : null))
         .then((json) => setSettings(json?.data ?? null))
         .catch(() => {});
     }
   }, [searchParams]);
+
+  async function handleSave() {
+    if (!tenant || !settings) return;
+    setSaving(true);
+    setSaved(false);
+
+    const res = await fetch(`/api/whatsapp-settings?tenant=${tenant}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(settings),
+    });
+
+    setSaving(false);
+    if (res.ok) {
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    }
+  }
 
   if (!tenant) {
     return (
@@ -53,9 +74,8 @@ function WhatsappSettingsInner() {
       <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 16 }}>
         WhatsApp Ayarları
       </h1>
-      <div style={{ margin: "12px 0 20px", opacity: 0.8 }}>
-        Aktif tenant: <code>{tenant}</code>
-      </div>
+
+      <p style={{ opacity: 0.8 }}>Aktif tenant: <code>{tenant}</code></p>
 
       <div
         style={{
@@ -63,30 +83,84 @@ function WhatsappSettingsInner() {
           borderRadius: 12,
           padding: 16,
           background: "#111418",
+          color: "#fff",
         }}
       >
-        <p style={{ margin: 0, opacity: 0.9 }}>
-          Form bileşenini burada render edin. İstersen geçici olarak
-          ayarları gösteriyorum:
-        </p>
+        {!settings ? (
+          <p>Yükleniyor...</p>
+        ) : (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSave();
+            }}
+          >
+            {[
+              { key: "accessToken", label: "Access Token" },
+              { key: "phoneNumberId", label: "Phone Number ID" },
+              { key: "businessId", label: "Business ID" },
+              { key: "verifyToken", label: "Verify Token" },
+            ].map((f) => (
+              <div key={f.key} style={{ marginBottom: 12 }}>
+                <label
+                  style={{
+                    display: "block",
+                    fontWeight: 600,
+                    marginBottom: 4,
+                    fontSize: 14,
+                  }}
+                >
+                  {f.label}
+                </label>
+                <input
+                  type="text"
+                  value={(settings as any)[f.key] || ""}
+                  onChange={(e) =>
+                    setSettings({
+                      ...settings,
+                      [f.key]: e.target.value,
+                    })
+                  }
+                  style={{
+                    width: "100%",
+                    padding: "8px 10px",
+                    borderRadius: 6,
+                    border: "1px solid #333",
+                    background: "#0b0e12",
+                    color: "#fff",
+                  }}
+                />
+              </div>
+            ))}
 
-        <pre
-          style={{
-            marginTop: 12,
-            background: "#0b0e12",
-            padding: 12,
-            borderRadius: 8,
-            overflow: "auto",
-          }}
-        >
-{JSON.stringify({ tenant, settings }, null, 2)}
-        </pre>
+            <button
+              type="submit"
+              disabled={saving}
+              style={{
+                background: saving ? "#555" : "#0d6efd",
+                color: "#fff",
+                border: "none",
+                borderRadius: 8,
+                padding: "10px 16px",
+                cursor: "pointer",
+                fontWeight: 600,
+              }}
+            >
+              {saving ? "Kaydediliyor..." : "Kaydet"}
+            </button>
+
+            {saved && (
+              <span style={{ marginLeft: 12, color: "#28a745" }}>
+                ✅ Kaydedildi
+              </span>
+            )}
+          </form>
+        )}
       </div>
     </div>
   );
 }
 
-// ✅ Suspense boundary ekliyoruz
 export default function WhatsappSettingsPage() {
   return (
     <Suspense fallback={<div style={{ padding: 20 }}>Yükleniyor...</div>}>
