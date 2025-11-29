@@ -82,3 +82,13 @@ export function migrate(db: any): void {
     );
   `);
 }
+// ✅ Render için otomatik migration (sadece runtime'da çalışsın)
+if (process.env.NODE_ENV !== "production" || process.env.RUN_MIGRATION === "true") {
+  try {
+    const db = openDb();
+    migrate(db);
+    console.log("🧩 Database ready (migrations applied)");
+  } catch (err) {
+    console.error("❌ Database migration failed:", err);
+  }
+}
