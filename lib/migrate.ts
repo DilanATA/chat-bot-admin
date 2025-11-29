@@ -1,24 +1,22 @@
 // lib/migrate.ts
-// ✅ Render uyumlu, kilitlenmeyen (SQLITE_BUSY yok) SQLite yöneticisi
+// ✅ Render uyumlu ve build sırasında SQLite kilitlenmez
 
 import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
 
-// Tek bağlantı (singleton)
 let dbInstance: any = null;
 
 /**
  * SQLite bağlantısını döndürür (tekil/singleton)
  * Render ortamında worker ve web birbirinden izole olur (/tmp kullanır)
- * busy_timeout -> 5 sn bekler, hemen hata vermez.
  */
 export function openDb() {
   if (dbInstance) return dbInstance;
 
   const isProd = process.env.NODE_ENV === "production";
   const dbPath = isProd
-    ? "/tmp/database.sqlite" // Render üzerinde her servis kendi tmp dosyasını kullanır
+    ? "/tmp/database.sqlite"
     : process.env.DB_PATH || path.join(process.cwd(), "data", "database.sqlite");
 
   const dir = path.dirname(dbPath);
@@ -26,12 +24,15 @@ export function openDb() {
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  const db = new Database(dbPath, { fileMustExist: false });
+  const db = new Database(dbPath, {
+    fileMustExist: false,
+    timeout: 5000, // bekleme süresi
+  });
 
   try {
-    db.pragma("journal_mode = WAL");      // paralel yazma güvenliği
-    db.pragma("busy_timeout = 5000");     // 5 sn bekleme
-    db.pragma("synchronous = NORMAL");    // hız optimizasyonu
+    db.pragma("journal_mode = WAL");
+    db.pragma("busy_timeout = 5000");
+    db.pragma("synchronous = NORMAL");
   } catch (err) {
     console.warn("⚠️ SQLite PRAGMA ayarlanamadı:", err);
   }
@@ -42,7 +43,7 @@ export function openDb() {
 
 /**
  * Tabloları oluşturur (idempotent)
- * Deploy sırasında tablo yoksa kurar, varsa dokunmaz.
+ * Deploy sırasında otomatik değil, runtime'da manuel çağrılır.
  */
 export function migrate(db: any): void {
   db.exec(`
@@ -80,13 +81,4 @@ export function migrate(db: any): void {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
   `);
-}
-
-// ✅ Render için otomatik migration (isteğe bağlı)
-try {
-  const db = openDb();
-  migrate(db);
-  console.log("🧩 Database ready (migrations applied)");
-} catch (err) {
-  console.error("❌ Database migration failed:", err);
 }
