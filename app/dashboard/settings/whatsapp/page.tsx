@@ -1,170 +1,281 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useToast } from "@/components/ui/use-toast";
+import { Eye, EyeOff, Copy } from "lucide-react";
 
 type WhatsappSettings = {
-  accessToken: string;
   phoneNumberId: string;
-  businessId?: string | null;
-  verifyToken?: string | null;
+  businessId: string;
+  accessToken: string;
+  verifyToken: string;
+  webhookUrl: string;
 };
 
-function WhatsappSettingsInner() {
-  const searchParams = useSearchParams();
-  const [tenant, setTenant] = useState<string | null>(null);
-  const [settings, setSettings] = useState<WhatsappSettings | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-
-  useEffect(() => {
-    const t = searchParams.get("tenant");
-    setTenant(t);
-
-    if (t) {
-      fetch(`/api/whatsapp-settings?tenant=${encodeURIComponent(t)}`)
-        .then((res) => (res.ok ? res.json() : null))
-        .then((json) => setSettings(json?.data ?? null))
-        .catch(() => {});
-    }
-  }, [searchParams]);
-
-  async function handleSave() {
-    if (!tenant || !settings) return;
-    setSaving(true);
-    setSaved(false);
-
-    const res = await fetch(`/api/whatsapp-settings?tenant=${tenant}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(settings),
-    });
-
-    setSaving(false);
-    if (res.ok) {
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
-    }
-  }
-
-  if (!tenant) {
-    return (
-      <div style={{ maxWidth: 900, margin: "24px auto", padding: "0 16px" }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 16 }}>
-          WhatsApp Ayarları
-        </h1>
-        <div
-          style={{
-            background: "#fff3cd",
-            color: "#664d03",
-            border: "1px solid #ffecb5",
-            borderRadius: 8,
-            padding: "14px 16px",
-          }}
-        >
-          <b>Tenant seçilmedi.</b> Lütfen URL&apos;e{" "}
-          <code>?tenant=FIRMA_A</code> gibi bir parametre ekleyin.
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ maxWidth: 900, margin: "24px auto", padding: "0 16px" }}>
-      <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 16 }}>
-        WhatsApp Ayarları
-      </h1>
-
-      <p style={{ opacity: 0.8 }}>Aktif tenant: <code>{tenant}</code></p>
-
-      <div
-        style={{
-          border: "1px solid #2a2a2a",
-          borderRadius: 12,
-          padding: 16,
-          background: "#111418",
-          color: "#fff",
-        }}
-      >
-        {!settings ? (
-          <p>Yükleniyor...</p>
-        ) : (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSave();
-            }}
-          >
-            {[
-              { key: "accessToken", label: "Access Token" },
-              { key: "phoneNumberId", label: "Phone Number ID" },
-              { key: "businessId", label: "Business ID" },
-              { key: "verifyToken", label: "Verify Token" },
-            ].map((f) => (
-              <div key={f.key} style={{ marginBottom: 12 }}>
-                <label
-                  style={{
-                    display: "block",
-                    fontWeight: 600,
-                    marginBottom: 4,
-                    fontSize: 14,
-                  }}
-                >
-                  {f.label}
-                </label>
-                <input
-                  type="text"
-                  value={(settings as any)[f.key] || ""}
-                  onChange={(e) =>
-                    setSettings({
-                      ...settings,
-                      [f.key]: e.target.value,
-                    })
-                  }
-                  style={{
-                    width: "100%",
-                    padding: "8px 10px",
-                    borderRadius: 6,
-                    border: "1px solid #333",
-                    background: "#0b0e12",
-                    color: "#fff",
-                  }}
-                />
-              </div>
-            ))}
-
-            <button
-              type="submit"
-              disabled={saving}
-              style={{
-                background: saving ? "#555" : "#0d6efd",
-                color: "#fff",
-                border: "none",
-                borderRadius: 8,
-                padding: "10px 16px",
-                cursor: "pointer",
-                fontWeight: 600,
-              }}
-            >
-              {saving ? "Kaydediliyor..." : "Kaydet"}
-            </button>
-
-            {saved && (
-              <span style={{ marginLeft: 12, color: "#28a745" }}>
-                ✅ Kaydedildi
-              </span>
-            )}
-          </form>
-        )}
-      </div>
-    </div>
-  );
-}
+type MessageLog = {
+  id: number;
+  tenant: string;
+  to_phone: string;
+  result: string;
+  created_at: string;
+};
 
 export default function WhatsappSettingsPage() {
+  const [settings, setSettings] = useState<WhatsappSettings>({
+    phoneNumberId: "",
+    businessId: "",
+    accessToken: "",
+    verifyToken: "",
+    webhookUrl: "",
+  });
+  const [original, setOriginal] = useState<WhatsappSettings | null>(null);
+  const [logs, setLogs] = useState<MessageLog[]>([]);
+  const [editing, setEditing] = useState(false);
+  const [showToken, setShowToken] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const { toast } = useToast();
+  const params = useSearchParams();
+  const tenant = params.get("tenant") ?? "DEFAULT";
+
+  // ✅ Ayarları getir
+  useEffect(() => {
+    async function fetchSettings() {
+      const res = await fetch(`/api/whatsapp-settings?tenant=${tenant}`);
+      const json = await res.json();
+      if (json.ok && json.data) {
+        setSettings(json.data);
+        setOriginal(json.data);
+      }
+    }
+    fetchSettings();
+  }, [tenant]);
+
+  // ✅ Logları getir
+  async function fetchLogs() {
+    try {
+      const res = await fetch(`/api/message-logs?tenant=${tenant}`);
+      const json = await res.json();
+      if (json.ok) setLogs(json.data);
+    } catch (err) {
+      console.error("Log yüklenemedi:", err);
+    }
+  }
+
+  // İlk yüklemede logları al
+  useEffect(() => {
+    fetchLogs();
+  }, [tenant]);
+
+  // ✅ Değişiklik olup olmadığını kontrol et
+  const hasChanges = original
+    ? JSON.stringify(settings) !== JSON.stringify(original)
+    : false;
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+
+    if (!settings.phoneNumberId || !settings.accessToken || !settings.verifyToken) {
+      toast({
+        title: "⚠️ Eksik Bilgi",
+        description: "Zorunlu alanları doldurmalısınız.",
+        variant: "error",
+      });
+      return;
+    }
+
+    if (!hasChanges) {
+      toast({
+        title: "ℹ️ Değişiklik Yok",
+        description: "Kaydedilecek bir değişiklik bulunmuyor.",
+        variant: "default",
+      });
+      setEditing(false);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/whatsapp-settings?tenant=${tenant}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settings),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        toast({
+          title: "✅ Kaydedildi",
+          description: `${tenant} ayarları güncellendi.`,
+          variant: "success",
+        });
+        setOriginal(settings);
+        setEditing(false);
+      } else {
+        toast({
+          title: "❌ Hata",
+          description: json.error,
+          variant: "error",
+        });
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // 👁 Token gizle/göster
+  const toggleTokenVisibility = () => setShowToken((p) => !p);
+
+  // 📋 URL kopyalama
+  const copyWebhookUrl = () => {
+    navigator.clipboard.writeText(settings.webhookUrl || "");
+    toast({
+      title: "📋 Kopyalandı",
+      description: "Webhook URL panoya kopyalandı.",
+      variant: "success",
+    });
+  };
+
   return (
-    <Suspense fallback={<div style={{ padding: 20 }}>Yükleniyor...</div>}>
-      <WhatsappSettingsInner />
-    </Suspense>
+    <div className="max-w-4xl mx-auto p-6 space-y-6">
+      <h1 className="text-2xl font-semibold mb-4">
+        WhatsApp Ayarları <span className="text-gray-400 text-sm">({tenant})</span>
+      </h1>
+
+      <Tabs defaultValue="settings">
+        <TabsList>
+          <TabsTrigger value="settings">Ayarlar</TabsTrigger>
+          <TabsTrigger value="logs">Webhook Logları</TabsTrigger>
+        </TabsList>
+
+        {/* 🧩 AYARLAR SEKMESİ */}
+        <TabsContent value="settings">
+          <form onSubmit={handleSave} className="space-y-4 mt-4">
+            <div className="grid gap-4">
+              <div>
+                <Label>Phone Number ID *</Label>
+                <Input
+                  disabled={!editing}
+                  value={settings.phoneNumberId}
+                  onChange={(e) =>
+                    setSettings({ ...settings, phoneNumberId: e.target.value })
+                  }
+                />
+              </div>
+
+              <div>
+                <Label>Business ID</Label>
+                <Input
+                  disabled={!editing}
+                  value={settings.businessId}
+                  onChange={(e) =>
+                    setSettings({ ...settings, businessId: e.target.value })
+                  }
+                />
+              </div>
+
+              <div className="relative">
+                <Label>Access Token *</Label>
+                <Input
+                  type={showToken ? "text" : "password"}
+                  disabled={!editing}
+                  value={settings.accessToken}
+                  onChange={(e) =>
+                    setSettings({ ...settings, accessToken: e.target.value })
+                  }
+                />
+                {editing && (
+                  <button
+                    type="button"
+                    onClick={toggleTokenVisibility}
+                    className="absolute right-3 top-8 text-gray-500 hover:text-gray-800"
+                  >
+                    {showToken ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                )}
+              </div>
+
+              <div>
+                <Label>Verify Token *</Label>
+                <Input
+                  disabled={!editing}
+                  value={settings.verifyToken}
+                  onChange={(e) =>
+                    setSettings({ ...settings, verifyToken: e.target.value })
+                  }
+                />
+              </div>
+
+              <div className="relative">
+                <Label>Webhook URL</Label>
+                <Input
+                  disabled={!editing}
+                  value={settings.webhookUrl}
+                  onChange={(e) =>
+                    setSettings({ ...settings, webhookUrl: e.target.value })
+                  }
+                />
+                <button
+                  type="button"
+                  onClick={copyWebhookUrl}
+                  className="absolute right-3 top-8 text-gray-500 hover:text-gray-800"
+                >
+                  <Copy size={18} />
+                </button>
+              </div>
+            </div>
+
+            {!editing ? (
+              <Button onClick={() => setEditing(true)}>Düzenle</Button>
+            ) : (
+              <Button type="submit" disabled={loading}>
+                {loading ? "Kaydediliyor..." : "Kaydet"}
+              </Button>
+            )}
+          </form>
+        </TabsContent>
+
+        {/* 🧩 WEBHOOK LOG SEKMESİ */}
+        <TabsContent value="logs">
+          <div className="mt-4">
+            <Button variant="outline" size="sm" onClick={fetchLogs}>
+              Yenile 🔄
+            </Button>
+
+            <div className="mt-4 border rounded-md">
+              {logs.length === 0 ? (
+                <p className="text-center text-gray-500 py-4">
+                  Henüz log bulunmuyor.
+                </p>
+              ) : (
+                <table className="min-w-full text-sm">
+                  <thead className="bg-gray-100 text-gray-700">
+                    <tr>
+                      <th className="p-2 text-left">ID</th>
+                      <th className="p-2 text-left">Telefon</th>
+                      <th className="p-2 text-left">Sonuç</th>
+                      <th className="p-2 text-left">Tarih</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {logs.map((log) => (
+                      <tr key={log.id} className="border-t">
+                        <td className="p-2">{log.id}</td>
+                        <td className="p-2">{log.to_phone}</td>
+                        <td className="p-2">{log.result}</td>
+                        <td className="p-2">{log.created_at}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </TabsContent>
+      </Tabs>
+    </div>
   );
 }

@@ -6,14 +6,17 @@ export const metadata: Metadata = {
   title: "chat-bot-admin",
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+
+import { Toaster } from "@/components/ui/toaster";
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="tr">
-      <body>{children}</body>
+      <body>
+        {children}
+        <Toaster />
+      </body>
     </html>
   );
 }
+

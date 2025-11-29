@@ -1,21 +1,32 @@
 // app/api/message-logs/route.ts
-export const runtime = "nodejs";
-
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { openDb } from "@/lib/migrate";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const tenant = searchParams.get("tenant");
-  const status = searchParams.get("status");
-  const limit = Number(searchParams.get("limit") || 100);
+  try {
+    const url = new URL(req.url);
+    const tenant = url.searchParams.get("tenant") ?? "DEFAULT";
+    const db = openDb();
 
-  let sql = "SELECT * FROM message_logs WHERE 1=1";
-  const args: any[] = [];
-  if (tenant) { sql += " AND tenant=?"; args.push(tenant); }
-  if (status) { sql += " AND status=?"; args.push(status); }
-  sql += " ORDER BY id DESC LIMIT ?"; args.push(limit);
+    const logs = db
+      .prepare(
+        `SELECT id, tenant, to_phone, result, created_at 
+         FROM message_logs 
+         WHERE tenant = ? 
+         ORDER BY id DESC 
+         LIMIT 20`
+      )
+      .all(tenant);
 
-  const rows = db.prepare(sql).all(...args);
-  return NextResponse.json({ ok: true, data: rows });
+    return NextResponse.json({ ok: true, data: logs });
+  } catch (err) {
+    console.error("❌ [GET /message-logs] error:", err);
+    return NextResponse.json(
+      { ok: false, error: String(err) },
+      { status: 500 }
+    );
+  }
 }
