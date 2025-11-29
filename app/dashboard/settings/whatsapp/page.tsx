@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -25,7 +25,7 @@ type MessageLog = {
   created_at: string;
 };
 
-export default function WhatsappSettingsPage() {
+function WhatsappSettingsInner() {
   const [settings, setSettings] = useState<WhatsappSettings>({
     phoneNumberId: "",
     businessId: "",
@@ -66,12 +66,11 @@ export default function WhatsappSettingsPage() {
     }
   }
 
-  // İlk yüklemede logları al
   useEffect(() => {
     fetchLogs();
   }, [tenant]);
 
-  // ✅ Değişiklik olup olmadığını kontrol et
+  // ✅ Değişiklik kontrolü
   const hasChanges = original
     ? JSON.stringify(settings) !== JSON.stringify(original)
     : false;
@@ -126,7 +125,7 @@ export default function WhatsappSettingsPage() {
     }
   }
 
-  // 👁 Token gizle/göster
+  // 👁 Token göster/gizle
   const toggleTokenVisibility = () => setShowToken((p) => !p);
 
   // 📋 URL kopyalama
@@ -142,7 +141,8 @@ export default function WhatsappSettingsPage() {
   return (
     <div className="max-w-4xl mx-auto p-6 space-y-6">
       <h1 className="text-2xl font-semibold mb-4">
-        WhatsApp Ayarları <span className="text-gray-400 text-sm">({tenant})</span>
+        WhatsApp Ayarları{" "}
+        <span className="text-gray-400 text-sm">({tenant})</span>
       </h1>
 
       <Tabs defaultValue="settings">
@@ -277,5 +277,13 @@ export default function WhatsappSettingsPage() {
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+export default function WhatsappSettingsPage() {
+  return (
+    <Suspense fallback={<div className="p-6">Yükleniyor...</div>}>
+      <WhatsappSettingsInner />
+    </Suspense>
   );
 }
