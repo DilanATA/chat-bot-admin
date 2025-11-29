@@ -3,10 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "migrate": "tsx lib/migrate.ts",
+    "build": "next build",
+    "start": "npm run migrate && next start",
     "dev": "next dev",
     "worker": "tsx worker/src/worker.ts",
-    "build": "next build",
-    "start": "next start",
     "lint": "eslint",
     "dev:worker": "tsx worker/src/index.ts",
     "migrate:worker": "tsx worker/src/storage.ts --migrate",

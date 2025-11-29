@@ -1,3 +1,6 @@
+// app/api/whatsapp-settings/route.ts
+// WhatsApp ayarlarını yöneten API endpoint'i
+
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const runtime = "nodejs";

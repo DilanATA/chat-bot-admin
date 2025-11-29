@@ -1,5 +1,7 @@
-import fs from "fs";
-import path from "path";
+// lib/whatsapp-settings.ts
+// WhatsApp ayarlarını SQLite veritabanında tutar
+
+import { openDb } from "@/lib/migrate";
 
 export type WhatsappSettings = {
   accessToken: string;
@@ -9,61 +11,59 @@ export type WhatsappSettings = {
   webhookUrl?: string | null;
 };
 
-// Render'da yazılabilir tek dizin /tmp; yerelde data/
-const FILE_PATH =
-  process.env.NODE_ENV === "production"
-    ? "/tmp/whatsapp-settings.json"
-    : path.join(process.cwd(), "data", "whatsapp-settings.json");
+// Ayarları getir
+export function getWhatsappSettings(tenant: string): WhatsappSettings | null {
+  const db = openDb();
 
-// Bellek içi yedek
-const memoryStore: Record<string, WhatsappSettings> = {};
+  const row = db
+    .prepare(
+      `
+      SELECT
+        access_token as accessToken,
+        phone_number_id as phoneNumberId,
+        business_id as businessId,
+        verify_token as verifyToken,
+        webhook_url as webhookUrl
+      FROM tenant_whatsapp_settings
+      WHERE tenant = ?
+    `
+    )
+    .get(tenant);
 
-function ensureDirSafe() {
-  try {
-    const dir = path.dirname(FILE_PATH);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-  } catch {
-    // Render ortamında fs devre dışıysa sessiz geç
-  }
+  return row || null;
 }
 
-function readFileSafe(): Record<string, WhatsappSettings> {
-  try {
-    ensureDirSafe();
-    if (!fs.existsSync(FILE_PATH)) return {};
-    const raw = fs.readFileSync(FILE_PATH, "utf8");
-    return JSON.parse(raw || "{}");
-  } catch {
-    return { ...memoryStore }; // fallback
-  }
-}
+// Ayarları ekle veya güncelle
+export function upsertWhatsappSettings(tenant: string, s: WhatsappSettings) {
+  const db = openDb();
 
-function writeFileSafe(data: Record<string, WhatsappSettings>) {
-  try {
-    ensureDirSafe();
-    fs.writeFileSync(FILE_PATH, JSON.stringify(data, null, 2), "utf8");
-  } catch {
-    // fs başarısızsa bellekte tut
-    Object.assign(memoryStore, data);
-  }
-}
+  db.prepare(
+    `
+    INSERT INTO tenant_whatsapp_settings (
+      tenant,
+      access_token,
+      phone_number_id,
+      business_id,
+      verify_token,
+      webhook_url
+    )
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(tenant)
+    DO UPDATE SET
+      access_token = excluded.access_token,
+      phone_number_id = excluded.phone_number_id,
+      business_id = excluded.business_id,
+      verify_token = excluded.verify_token,
+      webhook_url = excluded.webhook_url
+  `
+  ).run(
+    tenant,
+    s.accessToken,
+    s.phoneNumberId,
+    s.businessId ?? null,
+    s.verifyToken ?? null,
+    s.webhookUrl ?? null
+  );
 
-export function getWhatsappSettings(tenantId: string): WhatsappSettings | null {
-  const all = readFileSafe();
-  return all[tenantId] ?? null;
-}
-
-export function upsertWhatsappSettings(tenantId: string, s: WhatsappSettings) {
-  const all = readFileSafe();
-  all[tenantId] = {
-    accessToken: s.accessToken,
-    phoneNumberId: s.phoneNumberId,
-    businessId: s.businessId ?? null,
-    verifyToken: s.verifyToken ?? null,
-    webhookUrl: s.webhookUrl ?? null,
-  };
-  writeFileSafe(all);
   return { ok: true };
 }
