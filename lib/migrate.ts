@@ -10,14 +10,16 @@ let dbInstance: any = null;
 
 /**
  * SQLite bağlantısını döndürür (tekil/singleton)
- * Aynı process içinde birden fazla bağlantı açmaz.
+ * Render ortamında worker ve web birbirinden izole olur (/tmp kullanır)
  * busy_timeout -> 5 sn bekler, hemen hata vermez.
  */
 export function openDb() {
   if (dbInstance) return dbInstance;
 
-  const dbPath =
-    process.env.DB_PATH || path.join(process.cwd(), "data", "database.sqlite");
+  const isProd = process.env.NODE_ENV === "production";
+  const dbPath = isProd
+    ? "/tmp/database.sqlite" // Render üzerinde her servis kendi tmp dosyasını kullanır
+    : process.env.DB_PATH || path.join(process.cwd(), "data", "database.sqlite");
 
   const dir = path.dirname(dbPath);
   if (!fs.existsSync(dir)) {
@@ -27,9 +29,9 @@ export function openDb() {
   const db = new Database(dbPath, { fileMustExist: false });
 
   try {
-    db.pragma("journal_mode = WAL");      // daha güvenli paralel yazma
-    db.pragma("busy_timeout = 5000");     // 5 sn bekleme süresi
-    db.pragma("synchronous = NORMAL");    // hız için optimize
+    db.pragma("journal_mode = WAL");      // paralel yazma güvenliği
+    db.pragma("busy_timeout = 5000");     // 5 sn bekleme
+    db.pragma("synchronous = NORMAL");    // hız optimizasyonu
   } catch (err) {
     console.warn("⚠️ SQLite PRAGMA ayarlanamadı:", err);
   }
