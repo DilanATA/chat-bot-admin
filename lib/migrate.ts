@@ -1,18 +1,19 @@
 // lib/migrate.ts
-// ✅ Render uyumlu, kilitlenmeyen (SQLITE_BUSY yok) SQLite yönetimi
+// ✅ Render uyumlu, kilitlenmeyen (SQLITE_BUSY yok) SQLite yöneticisi
 
 import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
 
-let dbInstance: Database.Database | null = null;
+// Tek bağlantı (singleton)
+let dbInstance: any = null;
 
 /**
- * SQLite bağlantısını döndürür (singleton)
+ * SQLite bağlantısını döndürür (tekil/singleton)
  * Aynı process içinde birden fazla bağlantı açmaz.
- * busy_timeout ekli -> kilit durumunda 5 sn bekler.
+ * busy_timeout -> 5 sn bekler, hemen hata vermez.
  */
-export function openDb(): Database.Database {
+export function openDb() {
   if (dbInstance) return dbInstance;
 
   const dbPath =
@@ -26,9 +27,9 @@ export function openDb(): Database.Database {
   const db = new Database(dbPath, { fileMustExist: false });
 
   try {
-    db.pragma("journal_mode = WAL"); // daha güvenli paralel yazma
-    db.pragma("busy_timeout = 5000"); // 5 sn bekleme süresi
-    db.pragma("synchronous = NORMAL"); // hız için optimize
+    db.pragma("journal_mode = WAL");      // daha güvenli paralel yazma
+    db.pragma("busy_timeout = 5000");     // 5 sn bekleme süresi
+    db.pragma("synchronous = NORMAL");    // hız için optimize
   } catch (err) {
     console.warn("⚠️ SQLite PRAGMA ayarlanamadı:", err);
   }
@@ -38,9 +39,10 @@ export function openDb(): Database.Database {
 }
 
 /**
- * Tabloları oluşturur (idempotent, tekrar çalıştırılabilir)
+ * Tabloları oluşturur (idempotent)
+ * Deploy sırasında tablo yoksa kurar, varsa dokunmaz.
  */
-export function migrate(db: Database.Database): void {
+export function migrate(db: any): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS tenants (
       id   TEXT PRIMARY KEY,
@@ -79,7 +81,6 @@ export function migrate(db: Database.Database): void {
 }
 
 // ✅ Render için otomatik migration (isteğe bağlı)
-// Bu sayede import edildiğinde tablo yoksa otomatik kurulur.
 try {
   const db = openDb();
   migrate(db);
