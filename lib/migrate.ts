@@ -1,5 +1,5 @@
 // lib/migrate.ts
-// ✅ Render uyumlu ve build sırasında SQLite kilitlenmez
+// ✅ Build aşamasında SQLite'a asla dokunmaz
 
 import Database from "better-sqlite3";
 import path from "path";
@@ -7,12 +7,14 @@ import fs from "fs";
 
 let dbInstance: any = null;
 
-/**
- * SQLite bağlantısını döndürür (tekil/singleton)
- * Render ortamında worker ve web birbirinden izole olur (/tmp kullanır)
- */
 export function openDb() {
   if (dbInstance) return dbInstance;
+
+  // Build sırasında db açılmasını engelle
+  if (process.env.NEXT_PHASE === "build") {
+    console.log("⛔ Skipping DB open during build phase");
+    return null;
+  }
 
   const isProd = process.env.NODE_ENV === "production";
   const dbPath = isProd
@@ -26,7 +28,7 @@ export function openDb() {
 
   const db = new Database(dbPath, {
     fileMustExist: false,
-    timeout: 5000, // bekleme süresi
+    timeout: 5000,
   });
 
   try {
@@ -41,11 +43,12 @@ export function openDb() {
   return dbInstance;
 }
 
-/**
- * Tabloları oluşturur (idempotent)
- * Deploy sırasında otomatik değil, runtime'da manuel çağrılır.
- */
 export function migrate(db: any): void {
+  if (!db) {
+    console.log("⛔ Skipping migration (no DB instance)");
+    return;
+  }
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS tenants (
       id   TEXT PRIMARY KEY,
@@ -81,14 +84,4 @@ export function migrate(db: any): void {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
   `);
-}
-// ✅ Render için otomatik migration (sadece runtime'da çalışsın)
-if (process.env.NODE_ENV !== "production" || process.env.RUN_MIGRATION === "true") {
-  try {
-    const db = openDb();
-    migrate(db);
-    console.log("🧩 Database ready (migrations applied)");
-  } catch (err) {
-    console.error("❌ Database migration failed:", err);
-  }
 }
