@@ -1,6 +1,4 @@
 // lib/migrate.ts
-// ✅ Build aşamasında SQLite'a asla dokunmaz
-
 import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
@@ -10,21 +8,13 @@ let dbInstance: any = null;
 export function openDb() {
   if (dbInstance) return dbInstance;
 
-  // Build sırasında db açılmasını engelle
-  if (process.env.NEXT_PHASE === "build") {
-    console.log("⛔ Skipping DB open during build phase");
-    return null;
-  }
-
   const isProd = process.env.NODE_ENV === "production";
   const dbPath = isProd
     ? "/tmp/database.sqlite"
     : process.env.DB_PATH || path.join(process.cwd(), "data", "database.sqlite");
 
   const dir = path.dirname(dbPath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
   const db = new Database(dbPath, {
     fileMustExist: false,
@@ -44,10 +34,7 @@ export function openDb() {
 }
 
 export function migrate(db: any): void {
-  if (!db) {
-    console.log("⛔ Skipping migration (no DB instance)");
-    return;
-  }
+  if (!db) return;
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS tenants (
