@@ -3,12 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { openDb } from "@/lib/migrate";
 
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic"; // Render'da SSR cache kapalı olsun
+export const dynamic = "force-dynamic";
 
-/**
- * 🔹 Webhook doğrulama (GET)
- * Meta Developer paneli challenge isteği gönderdiğinde bu yanıt döner.
- */
 export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
@@ -16,7 +12,20 @@ export async function GET(req: NextRequest) {
     const token = url.searchParams.get("hub.verify_token");
     const challenge = url.searchParams.get("hub.challenge") ?? "0";
 
-    // .env veya DB'den verify_token al
+    // 🧱 Render build sırasında DB erişimini engelle
+    if (
+      process.env.NEXT_PHASE === "build" ||
+      (process.env.NODE_ENV === "production" &&
+        process.env.RENDER === "true" &&
+        !process.env.RUNTIME)
+    ) {
+      console.log("⛔ Skipping DB access during build");
+      return new Response(challenge, {
+        status: 200,
+        headers: { "Content-Type": "text/plain" },
+      });
+    }
+
     const db = openDb();
     const row = db
       .prepare("SELECT verify_token FROM tenant_whatsapp_settings LIMIT 1")
@@ -55,21 +64,10 @@ export async function GET(req: NextRequest) {
   }
 }
 
-/**
- * 🔹 Webhook mesajı (POST)
- * WhatsApp mesaj, ack veya delivery event'leri bu endpoint'e gönderir.
- */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     console.log("📩 Gelen Webhook:", JSON.stringify(body, null, 2));
-
-    // İstersen ileride message_logs tablosuna da kaydedebilirsin
-    // const db = openDb();
-    // db.prepare(
-    //   `INSERT INTO message_logs (tenant, to_phone, payload, result)
-    //    VALUES (?, ?, ?, ?)`
-    // ).run("DEFAULT", "unknown", JSON.stringify(body), "RECEIVED");
 
     return NextResponse.json({ ok: true });
   } catch (err) {
